@@ -31,12 +31,6 @@ START_RESPONSE = (
     "📲 Подберу лучшее решение под ваши задачи!"
 )
 
-DEFAULT_REPLY = (
-    "Я пока отвечаю только на команду /start 😊\n\n"
-    "Для заказа, консультации или оформления персональной скидки пишите напрямую:\n"
-    "👉 @evgen_blago"
-)
-
 
 def load_last_update_id() -> int:
     """Load the last processed update ID."""
@@ -88,17 +82,17 @@ async def process_updates():
             chat_type = chat.get("type", "")
             text = message.get("text", "")
 
-            # Only respond to private messages
+            # Only respond to the /start command in private chats.
+            # All other user messages are ignored (no auto-replies).
             if chat_type == "private" and chat_id:
                 if text.strip() == "/start":
-                    reply = START_RESPONSE
+                    logger.info(f"Replying to chat {chat_id}: /start")
+                    await client.post(
+                        f"{base_url}/sendMessage",
+                        json={"chat_id": chat_id, "text": START_RESPONSE},
+                    )
                 else:
-                    reply = DEFAULT_REPLY
-                logger.info(f"Replying to chat {chat_id}: {text[:50]}")
-                await client.post(
-                    f"{base_url}/sendMessage",
-                    json={"chat_id": chat_id, "text": reply},
-                )
+                    logger.info(f"Ignoring non-/start message from chat {chat_id}")
 
             # Track last processed update
             if update_id > last_id:
