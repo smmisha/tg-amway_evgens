@@ -7,8 +7,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.media_validator import validate_image_with_gemini_vision
-
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB Telegram limit for photos

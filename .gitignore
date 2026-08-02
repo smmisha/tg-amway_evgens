@@ -6,3 +6,4 @@ venv/
 node_modules/
 *.log
 .pytest_cache/
+.chrome-profile/

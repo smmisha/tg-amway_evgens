@@ -77,4 +77,8 @@ def clean_post_text(text: str) -> str:
     # Replace en-dash with em-dash
     t = t.replace(" – ", " — ").replace("–", "—")
 
+    # Clean dangling or empty hashtags at the end
+    t = re.sub(r"#\s*$", "", t).strip()
+    t = re.sub(r"#\s*#", "#", t).strip()
+
     return t

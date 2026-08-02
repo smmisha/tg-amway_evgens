@@ -15,6 +15,13 @@ SCRAPE_SECTIONS = [
 ]
 MAX_ARTICLES_PER_RUN = 2
 SCRAPE_DELAY_SECONDS = 10  # robots.txt: 1 request per 10 seconds
+# DataDome anti-bot: only a REAL headful browser (channel="chrome"/"msedge")
+# passes. Persistent profile stores the DataDome cookie between runs.
+CHROME_PROFILE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".chrome-profile"
+)
+CHROME_CHANNELS = ["chrome", "msedge", None]
+SCRAPE_WAIT_TIMEOUT_MS = 25000  # how long to wait for DataDome challenge to resolve
 
 # LLM settings
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")

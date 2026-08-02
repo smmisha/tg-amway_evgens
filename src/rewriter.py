@@ -27,7 +27,6 @@ from config.cta_templates import get_cta_instruction
 from config.prompts import (
     REWRITER_SYSTEM_INSTRUCTION,
     BOOK_ENRICHED_SYSTEM_INSTRUCTION,
-    HUMANIZER_SYSTEM_INSTRUCTION,
 )
 from src.humanizer import looks_like_model_artifact, clean_post_text
 from src.scraper import Article
@@ -80,8 +79,8 @@ async def call_gemini(system_prompt: str, user_prompt: str, image_path: str | No
         if encoded:
             mime_type, base64_data = encoded
             parts.append({
-                "inline_data": {
-                    "mime_type": mime_type,
+                "inlineData": {
+                    "mimeType": mime_type,
                     "data": base64_data,
                 }
             })

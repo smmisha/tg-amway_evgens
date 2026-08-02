@@ -29,6 +29,7 @@ from config.settings import (
 )
 from src.book_enricher import get_book_enrichment
 from src.media import download_first_image
+from src.media_validator import validate_image_with_gemini_vision
 from src.publisher import publish_post
 from src.rewriter import rewrite_article
 from src.scraper import scrape_amway, Article
@@ -125,6 +126,27 @@ async def run(dry_run: bool = False):
 
         logger.info(f"Generated post ({len(post_text)} chars):")
         logger.info(f"\n{post_text}\n")
+
+        # ── Step 5.5: Gemini "eyes" — check image + text together ──────
+        if image_path:
+            logger.info("[Step 5.5/6] Gemini visually checking image + text...")
+            try:
+                vision_ok = await validate_image_with_gemini_vision(
+                    image_path=image_path,
+                    topic_title=article.title,
+                    product_line=article.product_line,
+                    post_text=post_text,
+                )
+            except Exception as e:
+                logger.warning(f"Vision validation error: {e}. Proceeding without it.")
+                vision_ok = True
+
+            if not vision_ok:
+                logger.warning(
+                    "Gemini rejected the post (image/text mismatch). Skipping article."
+                )
+                continue
+            logger.info("Gemini approved the post (image + text match).")
 
         # ── Step 6: Publish ──────────────────────────────────────────
         if dry_run:

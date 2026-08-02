@@ -1,17 +1,18 @@
 # 🤖 Amway Telegram Bot — Content Rewriter & Publisher
 
 Автоматический бот, который парсит статьи и продукты с [amway.ua](https://www.amway.ua),
-перефразирует их через LLM в стиле бренд-амбассадора, и публикует в Telegram-группу.
+перефразирует их через LLM в стиле бренд-амбассадора, и публикует в Telegram.
 
 ## Возможности
 
 - 🕷️ **Парсинг** amway.ua через Playwright (headless Chromium)
-- 🧠 **Перефразирование** через Groq (Llama 3.3 70B) с Gemini fallback
+- 🧠 **Перефразирование** через Gemini (primary) с Groq fallback
+- 👁️ **Визуальная проверка** — Gemini «глазами» сверяет текст поста и картинку до публикации
 - 📚 **Обогащение** постов через базу из 40 книг по психологии и маркетингу
 - 🤖 **Хуманизация** — система Anti-AI для проверки качества генерации
-- 📸 **Изображения** — автоматическое скачивание и прикрепление
-- 📢 **Публикация** в Telegram-группу
-- ⏰ **Автоматизация** через GitHub Actions (каждые 6 часов)
+- 📸 **Изображения** — автоматическое скачивание, проверка и прикрепление
+- 📢 **Публикация** в Telegram (группа или личный чат после /start)
+- ⏰ **Автоматизация** через GitHub Actions (ежедневно в 20:00 Киев)
 
 ## Быстрый старт
 
@@ -40,9 +41,10 @@ cp .env.example .env
 | Переменная | Описание |
 |-----------|----------|
 | `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather |
-| `TELEGRAM_CHAT_ID` | ID группы (начинается с `-100`) |
-| `GROQ_API_KEY` | API ключ Groq (бесплатно на console.groq.com) |
+| `TELEGRAM_CHAT_ID` | ID чата для публикации (группа с `-100` или личный chat_id) |
+| `LLM_PROVIDER` | `gemini` (default) или `groq` |
 | `GEMINI_API_KEY` | API ключ Gemini (бесплатно на aistudio.google.com) |
+| `GROQ_API_KEY` | API ключ Groq (fallback, бесплатно на console.groq.com) |
 
 ### 4. Запуск
 
@@ -57,28 +59,32 @@ python -m src.main --dry-run
 ## GitHub Actions
 
 1. Зайдите в Settings → Secrets → Actions в вашем GitHub-репозитории
-2. Добавьте секреты: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GROQ_API_KEY`, `GEMINI_API_KEY`
-3. Бот будет запускаться автоматически каждые 6 часов
-4. Ручной запуск: Actions → "Amway Bot — Publish Posts" → Run workflow
+2. Добавьте секреты: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`, `GROQ_API_KEY`
+3. `publish.yml` — публикация постов ежедневно в 20:00 Киев (`0 17 * * *` UTC)
+4. `responder.yml` — отвечает на команды (`/start` и т.д.) каждые 5 минут
+5. Ручной запуск: Actions → "Amway Bot — Publish Posts" → Run workflow
 
 ## Архитектура
 
 ```
 src/
-├── main.py          — Оркестратор (точка входа)
-├── scraper.py       — Парсер amway.ua (Playwright)
-├── rewriter.py      — LLM перефразирование (Groq → Gemini)
-├── humanizer.py     — Anti-AI валидация (из voice.js)
-├── book_enricher.py — Обогащение через книги
-├── publisher.py     — Telegram publisher
-├── media.py         — Скачивание изображений
-└── storage.py       — Трекинг опубликованных
+├── main.py            — Оркестратор (точка входа)
+├── scraper.py         — Парсер amway.ua (Playwright)
+├── rewriter.py        — LLM перефразирование (Gemini → Groq)
+├── humanizer.py       — Anti-AI валидация (из voice.js)
+├── book_enricher.py   — Обогащение через книги
+├── publisher.py       — Telegram publisher
+├── media.py           — Скачивание изображений
+├── media_validator.py — Gemini Vision: проверка картинки + текста поста
+├── bot_listener.py    — Long-polling обработчик команд бота
+├── responder.py       — Ответы на /start через getUpdates (для GitHub Actions)
+└── storage.py         — Трекинг опубликованных
 ```
 
 ## Пайплайн
 
 ```
-Scrape → Filter → Enrich (30%) → Rewrite → Media → Publish → Save
+Scrape → Filter → Enrich (30%) → Rewrite → Media → Gemini Vision (текст+картинка) → Publish → Save
 ```
 
 ## Книжная база
