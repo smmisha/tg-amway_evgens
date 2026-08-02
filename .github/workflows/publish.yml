@@ -44,9 +44,15 @@ jobs:
 
       - name: Commit updated published.json
         if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config user.name "Amway Bot"
           git config user.email "bot@github.com"
           git add data/published.json
           git diff --staged --quiet || git commit -m "Update published articles [skip ci]"
-          git push
+          if [ -n "$GH_PAT" ]; then
+            git push "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          else
+            git push
+          fi
