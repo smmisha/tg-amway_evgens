@@ -153,6 +153,11 @@ async def run(dry_run: bool = False):
 
 
 def main():
+    if "--listen" in sys.argv:
+        from src.bot_listener import run_bot_listener
+        run_bot_listener()
+        return
+
     dry_run = "--dry-run" in sys.argv
     if dry_run:
         logger.info("Running in DRY RUN mode (no Telegram publishing)")
