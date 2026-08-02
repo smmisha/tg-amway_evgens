@@ -169,28 +169,49 @@ async def validate_with_gemini(post_text: str) -> str:
     """Strictly check and fix the post with Gemini before publishing.
 
     Runs the full pre-publication checklist (language purity, duplication,
-    typography, tone). Returns the corrected text, or the original if
-    Gemini is unavailable or fails.
+    typography, tone, mandatory CTA + hashtags). Re-checks the result and
+    re-asks until the post ends with @evgen_blago + 2 hashtags.
+    Returns the corrected text, or the original if Gemini is unavailable.
     """
     if not GEMINI_API_KEY:
         return post_text
 
-    user_prompt = (
-        "Проверь и исправь этот текст для публикации по всем пунктам инструкции. "
-        f"Верни ТОЛЬКО исправленный текст целиком (без рассуждений, без списка ошибок).\n\n"
-        f"ТЕКСТ:\n{post_text}"
-    )
-    try:
-        corrected = await call_gemini(VALIDATION_SYSTEM_INSTRUCTION, user_prompt)
-        corrected = corrected.strip()
-        if corrected:
-            logger.info(f"Gemini validation passed — final text ({len(corrected)} chars).")
-            return corrected
-        logger.warning("Gemini validation returned empty text. Keeping original.")
+    if _has_mandatory_finish(post_text):
         return post_text
-    except Exception as e:
-        logger.warning(f"Gemini validation failed: {e}. Keeping original text.")
-        return post_text
+
+    for attempt in range(1, 4):
+        user_prompt = (
+            "Проверь и исправь этот текст для публикации по всем пунктам инструкции. "
+            "Верни ТОЛЬКО исправленный текст целиком (без рассуждений, без списка ошибок).\n\n"
+            f"ТЕКСТ:\n{post_text}"
+        )
+        try:
+            corrected = await call_gemini(VALIDATION_SYSTEM_INSTRUCTION, user_prompt)
+            corrected = corrected.strip()
+            if corrected and _has_mandatory_finish(corrected):
+                logger.info(
+                    f"Gemini validation passed — final text ({len(corrected)} chars)."
+                )
+                return corrected
+            logger.warning(
+                f"Gemini validation attempt {attempt}: missing CTA/hashtags or empty. Retrying..."
+            )
+        except Exception as e:
+            logger.warning(f"Gemini validation attempt {attempt} failed: {e}")
+            if GEMINI_API_KEY:
+                await asyncio.sleep(2 * attempt)
+
+    logger.error("Gemini validation could not fix post ending. Appending CTA manually.")
+    from config.cta_templates import get_cta
+
+    product_line = "default"
+    cta = get_cta(product_line=product_line)
+    return f"{post_text.rstrip()}\n\n{cta}\n\n#Amway"
+
+
+def _has_mandatory_finish(text: str) -> bool:
+    """Post must contain @evgen_blago and at least one hashtag."""
+    return "@evgen_blago" in text and "#" in text
 
 
 async def rewrite_article(
