@@ -27,6 +27,7 @@ from config.cta_templates import get_cta_instruction
 from config.prompts import (
     REWRITER_SYSTEM_INSTRUCTION,
     BOOK_ENRICHED_SYSTEM_INSTRUCTION,
+    VALIDATION_SYSTEM_INSTRUCTION,
 )
 from src.humanizer import looks_like_model_artifact, clean_post_text
 from src.scraper import Article
@@ -164,6 +165,34 @@ async def call_llm(system_prompt: str, user_prompt: str, image_path: str | None 
     raise RuntimeError("No LLM API keys configured")
 
 
+async def validate_with_gemini(post_text: str) -> str:
+    """Strictly check and fix the post with Gemini before publishing.
+
+    Runs the full pre-publication checklist (language purity, duplication,
+    typography, tone). Returns the corrected text, or the original if
+    Gemini is unavailable or fails.
+    """
+    if not GEMINI_API_KEY:
+        return post_text
+
+    user_prompt = (
+        "Проверь и исправь этот текст для публикации по всем пунктам инструкции. "
+        f"Верни ТОЛЬКО исправленный текст целиком (без рассуждений, без списка ошибок).\n\n"
+        f"ТЕКСТ:\n{post_text}"
+    )
+    try:
+        corrected = await call_gemini(VALIDATION_SYSTEM_INSTRUCTION, user_prompt)
+        corrected = corrected.strip()
+        if corrected:
+            logger.info(f"Gemini validation passed — final text ({len(corrected)} chars).")
+            return corrected
+        logger.warning("Gemini validation returned empty text. Keeping original.")
+        return post_text
+    except Exception as e:
+        logger.warning(f"Gemini validation failed: {e}. Keeping original text.")
+        return post_text
+
+
 async def rewrite_article(
     article: Article,
     include_cta: bool | None = None,
@@ -222,6 +251,8 @@ async def rewrite_article(
             result = clean_post_text(result)
             if len(result) > POST_MAX_LENGTH:
                 result = result[:POST_MAX_LENGTH - 3] + "..."
+            # Strict pre-publication check by Gemini (fixes language/typo/tone)
+            result = await validate_with_gemini(result)
             return result
 
         if attempt < LLM_MAX_RETRIES:

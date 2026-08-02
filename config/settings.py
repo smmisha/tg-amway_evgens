@@ -13,7 +13,7 @@ SCRAPE_SECTIONS = [
     "/uk/c/beauty",
     "/uk/c/home-care",
 ]
-MAX_ARTICLES_PER_RUN = 2
+MAX_ARTICLES_PER_RUN = 1
 SCRAPE_DELAY_SECONDS = 10  # robots.txt: 1 request per 10 seconds
 # DataDome anti-bot: only a REAL headful browser (channel="chrome"/"msedge")
 # passes. Persistent profile stores the DataDome cookie between runs.
