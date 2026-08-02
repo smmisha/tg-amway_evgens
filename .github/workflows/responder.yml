@@ -1,0 +1,39 @@
+name: Bot Responder — Reply to /start
+
+on:
+  schedule:
+    # Every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install httpx python-dotenv
+
+      - name: Check and reply to messages
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python -m src.responder
+
+      - name: Commit updated last_update_id
+        if: always()
+        run: |
+          git config user.name "Amway Bot"
+          git config user.email "bot@github.com"
+          git add data/last_update_id.txt
+          git diff --staged --quiet || git commit -m "Update last_update_id [skip ci]"
+          git push
