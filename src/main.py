@@ -69,8 +69,9 @@ async def run(dry_run: bool = False):
     logger.info(f"New articles after filtering: {len(new_articles)}")
 
     if not new_articles:
-        logger.info("No new scraped articles found. Skipping run (no fallback posts).")
-        return
+        logger.error("No new scraped articles found. Skipping run (no posts published).")
+        logger.error("Exiting with non-zero code so the workflow fails visibly.")
+        sys.exit(2)
 
     selected = new_articles[:MAX_ARTICLES_PER_RUN]
 
@@ -176,6 +177,10 @@ async def run(dry_run: bool = False):
     logger.info(f"\n{'=' * 50}")
     logger.info(f"Pipeline complete. Published {published_count}/{len(selected)} posts.")
     logger.info(f"Total in DB: {storage.count()}")
+
+    if published_count == 0:
+        logger.error("No posts were published this run. Exiting with non-zero code.")
+        sys.exit(3)
 
 
 def main():
