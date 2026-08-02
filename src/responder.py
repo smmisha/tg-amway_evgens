@@ -29,6 +29,13 @@ START_RESPONSE = (
     "👉 @evgen_blago"
 )
 
+DEFAULT_REPLY = (
+    "Я поки що відповідаю тільки на команду /start 😊\n"
+    "Для замовлення продукції Amway, консультацій "
+    "або оформлення персональної знижки пишіть напряму:\n"
+    "👉 @evgen_blago"
+)
+
 
 def load_last_update_id() -> int:
     """Load the last processed update ID."""
@@ -82,10 +89,14 @@ async def process_updates():
 
             # Only respond to private messages
             if chat_type == "private" and chat_id:
+                if text.strip() == "/start":
+                    reply = START_RESPONSE
+                else:
+                    reply = DEFAULT_REPLY
                 logger.info(f"Replying to chat {chat_id}: {text[:50]}")
                 await client.post(
                     f"{base_url}/sendMessage",
-                    json={"chat_id": chat_id, "text": START_RESPONSE},
+                    json={"chat_id": chat_id, "text": reply},
                 )
 
             # Track last processed update

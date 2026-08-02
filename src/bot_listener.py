@@ -15,6 +15,13 @@ START_RESPONSE_TEXT = """
 👉 @evgen_blago
 """.strip()
 
+DEFAULT_REPLY_TEXT = (
+    "Я поки що відповідаю тільки на команду /start 😊\n"
+    "Для замовлення продукції Amway, консультацій "
+    "або оформлення персональної знижки пишіть напряму:\n"
+    "👉 @evgen_blago"
+)
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command in private chat."""
@@ -25,7 +32,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def generic_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle any direct text message sent to the bot in private chat."""
     if update.message and update.message.chat.type == "private":
-        await update.message.reply_text(START_RESPONSE_TEXT)
+        await update.message.reply_text(DEFAULT_REPLY_TEXT)
 
 
 def run_bot_listener():
