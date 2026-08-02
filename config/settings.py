@@ -13,7 +13,9 @@ SCRAPE_SECTIONS = [
     "/uk/c/beauty",
     "/uk/c/home-care",
 ]
-MAX_ARTICLES_PER_RUN = 1
+MAX_ARTICLES_PER_RUN = 1  # goal: one published post per run/day
+CANDIDATE_POOL_SIZE = 8  # how many fresh candidates we try before giving up the run
+ATTEMPTED_COOLDOWN_DAYS = 7  # skip previously-failed articles for this many days
 SCRAPE_DELAY_SECONDS = 10  # robots.txt: 1 request per 10 seconds
 # DataDome anti-bot: only a REAL headful browser (channel="chrome"/"msedge")
 # passes. Persistent profile stores the DataDome cookie between runs.
@@ -51,4 +53,5 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Paths
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 PUBLISHED_JSON = os.path.join(DATA_DIR, "published.json")
+ATTEMPTED_JSON = os.path.join(DATA_DIR, "attempted.json")
 BOOKS_BUNDLE_JSON = os.path.join(DATA_DIR, "books_bundle.json")

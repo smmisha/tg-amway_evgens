@@ -2,12 +2,16 @@
 
 Pipeline:
 1. Scrape → get articles from amway.ua
-2. Filter → remove already published
+2. Filter → remove already published + in-cooldown failed candidates
 3. Enrich → optionally add book context (30% of posts)
 4. Rewrite → LLM rewriting in brand-ambassador style
 5. Media → download images
 6. Publish → send to Telegram group
 7. Save → mark as published
+
+Candidates are processed as a POOL: if one fails (image download, rewrite,
+Gemini vision rejection, publish), it is recorded in attempted.json and the
+next candidate is tried until the day's goal (1 post) is reached.
 
 Usage:
     python -m src.main              # Full pipeline
@@ -20,7 +24,9 @@ import random
 import sys
 
 from config.settings import (
+    ATTEMPTED_JSON,
     BOOK_ENRICHMENT_PROBABILITY,
+    CANDIDATE_POOL_SIZE,
     MAX_ARTICLES_PER_RUN,
     PUBLISHED_JSON,
     SCRAPE_DELAY_SECONDS,
@@ -36,7 +42,7 @@ from src.media_validator import validate_image_with_gemini_vision
 from src.publisher import publish_post
 from src.rewriter import rewrite_article
 from src.scraper import scrape_amway, Article
-from src.storage import Storage
+from src.storage import AttemptStorage, Storage
 
 # Configure logging
 logging.basicConfig(
@@ -69,7 +75,9 @@ async def run(dry_run: bool = False):
     logger.info("=" * 50)
 
     storage = Storage(PUBLISHED_JSON)
+    attempts = AttemptStorage(ATTEMPTED_JSON)
     logger.info(f"Published articles in DB: {storage.count()}")
+    logger.info(f"Attempted (failed, in cooldown) candidates: {attempts.count()}")
 
     # ── Telegram target diagnostics ─────────────────────────────────────
     _log_telegram_targets()
@@ -80,23 +88,34 @@ async def run(dry_run: bool = False):
         sections=SCRAPE_SECTIONS,
         base_url=SCRAPE_BASE_URL,
         delay=SCRAPE_DELAY_SECONDS,
-        max_articles=MAX_ARTICLES_PER_RUN * 3,  # Fetch extra for filtering
+        max_articles=CANDIDATE_POOL_SIZE * 2,  # Extra to survive filtering
     )
     logger.info(f"Scraped {len(articles)} articles")
 
-    new_articles = [a for a in articles if not storage.is_published(a.url)]
+    new_articles = [
+        a
+        for a in articles
+        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
+    ]
     logger.info(f"New articles after filtering: {len(new_articles)}")
 
     if not new_articles:
-        logger.error("No new scraped articles found. Skipping run (no posts published).")
-        logger.error("Exiting with non-zero code so the workflow fails visibly.")
+        logger.error(
+            "No fresh candidates after filtering published + failed(cooldown) "
+            "articles. Skipping run (no posts published)."
+        )
         sys.exit(2)
 
-    selected = new_articles[:MAX_ARTICLES_PER_RUN]
+    # Iterate over a POOL of candidates. We stop on the first that fully
+    # succeeds (goal: MAX_ARTICLES_PER_RUN=1 post per day) instead of
+    # aborting on the first failure. Failed candidates are recorded so next
+    # run starts from the next article and not the same broken one.
+    selected = new_articles[:CANDIDATE_POOL_SIZE]
 
-    logger.info(f"Selected {len(selected)} items for processing")
+    logger.info(f"Selected {len(selected)} items for processing (pool={CANDIDATE_POOL_SIZE})")
 
     published_count = 0
+    failures: list[str] = []
 
     for i, article in enumerate(selected, 1):
         logger.info(f"\n{'─' * 40}")
@@ -114,11 +133,18 @@ async def run(dry_run: bool = False):
 
         # ── Step 4: Media Selection ──────────────────────────────────
         logger.info("[Step 4/6] Selecting topic-matched product image...")
-        image_path = await download_first_image(
-            article.images,
-            article.product_line,
-            title=article.title,
-        )
+        try:
+            image_path = await download_first_image(
+                article.images,
+                article.product_line,
+                title=article.title,
+            )
+        except Exception as e:
+            logger.error(f"Image download failed: {e}. Skipping article.")
+            if not dry_run:
+                attempts.mark_attempted(article.url, reason=f"image_download: {e}")
+            failures.append(f"{article.title} — image_download: {e}")
+            continue
         if image_path:
             logger.info(f"Image ready: {image_path}")
 
@@ -132,6 +158,9 @@ async def run(dry_run: bool = False):
             )
         except RuntimeError as e:
             logger.error(f"Rewrite failed: {e}. Skipping article.")
+            if not dry_run:
+                attempts.mark_attempted(article.url, reason=f"rewrite: {e}")
+            failures.append(f"{article.title} — rewrite: {e}")
             continue
 
         logger.info(f"Generated post ({len(post_text)} chars):")
@@ -153,8 +182,14 @@ async def run(dry_run: bool = False):
 
             if not vision_ok:
                 logger.warning(
-                    "Gemini rejected the post (image/text mismatch). Skipping article."
+                    "Gemini rejected the post (image/text mismatch). "
+                    "Marking candidate failed; trying the next one."
                 )
+                if not dry_run:
+                    attempts.mark_attempted(
+                        article.url, reason="gemini_vision_mismatch"
+                    )
+                failures.append(f"{article.title} — gemini_vision_mismatch")
                 continue
             logger.info("Gemini approved the post (image + text match).")
 
@@ -175,23 +210,42 @@ async def run(dry_run: bool = False):
                     chat_id=TELEGRAM_ADMIN_CHAT_ID,
                 )
             logger.info("[Step 6/6] Publishing to Telegram group...")
-            message_id = await publish_post(
-                text=post_text,
-                image_path=image_path,
-                use_html=False,  # Plain text — emojis don't need HTML
-            )
+            try:
+                message_id = await publish_post(
+                    text=post_text,
+                    image_path=image_path,
+                    use_html=False,  # Plain text — emojis don't need HTML
+                )
+            except Exception as e:
+                logger.error(f"Publish failed: {e}. Skipping article.")
+                if not dry_run:
+                    attempts.mark_attempted(article.url, reason=f"publish: {e}")
+                failures.append(f"{article.title} — publish: {e}")
+                continue
             if not message_id:
                 logger.error("Failed to publish. Skipping.")
+                if not dry_run:
+                    attempts.mark_attempted(article.url, reason="publish_empty")
+                failures.append(f"{article.title} — publish returned no message_id")
                 continue
 
         # ── Step 7: Save ─────────────────────────────────────────────
-        storage.mark_published(
-            url=article.url,
-            title=article.title,
-            telegram_message_id=message_id or "",
-        )
+        # Only persist real publications. Dry-run must NOT mutate state
+        # (otherwise a rehearsal run destroys the candidate queue).
+        if not dry_run:
+            storage.mark_published(
+                url=article.url,
+                title=article.title,
+                telegram_message_id=message_id or "",
+            )
         published_count += 1
-        logger.info(f"Marked as published. Message ID: {message_id}")
+        logger.info(
+            f"Marked as published (dry_run={dry_run}). Message ID: {message_id}"
+        )
+        logger.info(
+            f"Day's goal reached ({MAX_ARTICLES_PER_RUN} post). Stopping loop."
+        )
+        break
 
     logger.info(f"\n{'=' * 50}")
     logger.info(f"Pipeline complete. Published {published_count}/{len(selected)} posts.")
@@ -199,7 +253,11 @@ async def run(dry_run: bool = False):
 
     if published_count == 0:
         logger.error("No posts were published this run. Exiting with non-zero code.")
-        sys.exit(3)
+        if failures:
+            logger.error("Reasons (per attempted candidate):")
+            for reason in failures:
+                logger.error(f"  - {reason}")
+        sys.exit(4)
 
 
 def main():

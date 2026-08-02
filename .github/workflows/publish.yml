@@ -49,7 +49,7 @@ jobs:
         run: |
           git config user.name "Amway Bot"
           git config user.email "bot@github.com"
-          git add data/published.json
+          git add data/published.json data/attempted.json
           git diff --staged --quiet || git commit -m "Update published articles [skip ci]"
           if [ -n "$GH_PAT" ]; then
             git push "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
