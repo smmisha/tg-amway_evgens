@@ -61,7 +61,12 @@ async def call_groq(system_prompt: str, user_prompt: str) -> str:
                     await asyncio.sleep(5 * attempt)
                     continue
                 resp.raise_for_status()
-                return data["choices"][0]["message"]["content"].strip()
+                choice = data["choices"][0]
+                content = choice["message"]["content"].strip()
+                if choice.get("finish_reason") == "length":
+                    logger.warning(f"Groq response truncated (finish_reason=length, attempt {attempt}). Retrying...")
+                    raise RuntimeError("Groq response truncated")
+                return content
             except Exception as e:
                 logger.warning(f"Groq attempt {attempt} failed: {e}")
                 if attempt < 2:
