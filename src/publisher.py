@@ -62,8 +62,7 @@ async def publish_post(
 
         if image_path and os.path.exists(image_path):
             with open(image_path, "rb") as photo:
-                if len(final_text) <= 1024:
-                    # Fits entirely inside Telegram photo caption
+                if len(final_text) <= 1000:
                     message = await bot.send_photo(
                         chat_id=TELEGRAM_CHAT_ID,
                         photo=photo,
@@ -73,21 +72,23 @@ async def publish_post(
                     logger.info(f"Published photo post. Message ID: {message.message_id}")
                     return str(message.message_id)
                 else:
-                    # Caption > 1024: Send photo first, then full post text (up to 4096 chars)
-                    first_line = final_text.split("\n")[0][:200]
-                    await bot.send_photo(
+                    # Truncate cleanly at last full sentence or space boundary before 950 chars
+                    caption_text = final_text[:950]
+                    last_end = max(caption_text.rfind("."), caption_text.rfind("!"), caption_text.rfind("?"), caption_text.rfind("\n"))
+                    if last_end > 200:
+                        caption_text = caption_text[:last_end + 1]
+                    else:
+                        last_space = caption_text.rfind(" ")
+                        if last_space > 200:
+                            caption_text = caption_text[:last_space] + "..."
+
+                    message = await bot.send_photo(
                         chat_id=TELEGRAM_CHAT_ID,
                         photo=photo,
-                        caption=first_line,
+                        caption=caption_text,
                         parse_mode=parse_mode,
                     )
-                    message = await bot.send_message(
-                        chat_id=TELEGRAM_CHAT_ID,
-                        text=final_text,
-                        parse_mode=parse_mode,
-                        disable_web_page_preview=True,
-                    )
-                    logger.info(f"Published photo + full text post ({len(final_text)} chars). Message ID: {message.message_id}")
+                    logger.info(f"Published clean photo post ({len(caption_text)} chars). Message ID: {message.message_id}")
                     return str(message.message_id)
         else:
             # Send text-only message (Telegram limit 4096)

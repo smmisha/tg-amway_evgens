@@ -68,23 +68,20 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
 
 FALLBACK_PRODUCT_IMAGES = {
     "XS": [
-        "https://media.amway.com/sys-master/images/h67/hc1/8920197070878/XS-Power-Drink-Tropical.jpg",
-        "https://www.amway.ua/medias/XS-Power-Drink.jpg?context=bWFzdGVyfGltYWdlc3wxMDI0MDB8aW1hZ2UvanBlZ3xoMTcvaDM0LzkxNDIxODQ5MzU0NTQuanBn",
+        "https://images.pexels.com/photos/2538107/pexels-photo-2538107.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
     "Nutrilite": [
-        "https://media.amway.com/sys-master/images/hb3/h3d/8920197464094/Nutrilite-Omega-3.jpg",
-        "https://media.amway.com/sys-master/images/ha2/h4e/8920197529630/Nutrilite-Double-X.jpg",
+        "https://images.pexels.com/photos/5938392/pexels-photo-5938392.jpeg?auto=compress&cs=tinysrgb&w=800",
+        "https://images.pexels.com/photos/3683074/pexels-photo-3683074.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
     "Artistry": [
-        "https://media.amway.com/sys-master/images/h0b/h89/8920197824542/Artistry-Skin-Nutrition.jpg",
-        "https://media.amway.com/sys-master/images/h53/h12/8920197890078/Artistry-Supreme-LX.jpg",
+        "https://images.pexels.com/photos/3785147/pexels-photo-3785147.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
     "Home Care": [
-        "https://media.amway.com/sys-master/images/h31/h67/8920198152222/Amway-Home-LOC.jpg",
-        "https://media.amway.com/sys-master/images/h82/h9a/8920198217758/Amway-Home-SA8.jpg",
+        "https://images.pexels.com/photos/4239091/pexels-photo-4239091.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
     "default": [
-        "https://media.amway.com/sys-master/images/hb3/h3d/8920197464094/Nutrilite-Omega-3.jpg",
+        "https://images.pexels.com/photos/5938392/pexels-photo-5938392.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
 }
 
