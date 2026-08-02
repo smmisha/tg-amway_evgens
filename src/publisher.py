@@ -9,7 +9,7 @@ import os
 from telegram import Bot, InputMediaPhoto
 from telegram.constants import ParseMode
 
-from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_CHAT_ID, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,15 @@ async def publish_post(
     text: str,
     image_path: str | None = None,
     use_html: bool = True,
+    chat_id: str | None = None,
 ) -> str | None:
-    """Publish a post to the Telegram group.
+    """Publish a post to a Telegram chat (group by default, or admin chat).
 
     Args:
         text: Post text to send
         image_path: Optional path to local image file
         use_html: Use HTML parse mode (default). If False, sends plain text.
+        chat_id: Target chat. Defaults to the publish group.
 
     Returns:
         Message ID string on success, None on failure
@@ -44,8 +46,9 @@ async def publish_post(
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN is not set")
         return None
-    if not TELEGRAM_CHAT_ID:
-        logger.error("TELEGRAM_CHAT_ID is not set")
+    target_chat = chat_id or TELEGRAM_GROUP_CHAT_ID
+    if not target_chat:
+        logger.error("Telegram chat id is not set (TELEGRAM_GROUP_CHAT_ID)")
         return None
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -64,7 +67,7 @@ async def publish_post(
             with open(image_path, "rb") as photo:
                 if len(final_text) <= 1000:
                     message = await bot.send_photo(
-                        chat_id=TELEGRAM_CHAT_ID,
+                        chat_id=target_chat,
                         photo=photo,
                         caption=final_text,
                         parse_mode=parse_mode,
@@ -83,7 +86,7 @@ async def publish_post(
                             caption_text = caption_text[:last_space] + "..."
 
                     message = await bot.send_photo(
-                        chat_id=TELEGRAM_CHAT_ID,
+                        chat_id=target_chat,
                         photo=photo,
                         caption=caption_text,
                         parse_mode=parse_mode,
@@ -93,7 +96,7 @@ async def publish_post(
         else:
             # Send text-only message (Telegram limit 4096)
             message = await bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
+                chat_id=target_chat,
                 text=final_text,
                 parse_mode=parse_mode,
                 disable_web_page_preview=True,
@@ -109,18 +112,24 @@ async def publish_post(
 async def publish_media_group(
     text: str,
     image_paths: list[str],
+    chat_id: str | None = None,
 ) -> str | None:
     """Publish a media group (multiple images) with caption.
 
     Args:
         text: Caption text for the first image
         image_paths: List of local image file paths
+        chat_id: Target chat. Defaults to the publish group.
 
     Returns:
         First message ID string on success, None on failure
     """
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    if not TELEGRAM_BOT_TOKEN:
         logger.error("Telegram credentials not configured")
+        return None
+    target_chat = chat_id or TELEGRAM_GROUP_CHAT_ID
+    if not target_chat:
+        logger.error("Telegram chat id is not set (TELEGRAM_GROUP_CHAT_ID)")
         return None
 
     if not image_paths:
@@ -148,7 +157,7 @@ async def publish_media_group(
             return await publish_post(text)
 
         messages = await bot.send_media_group(
-            chat_id=TELEGRAM_CHAT_ID,
+            chat_id=target_chat,
             media=media,
         )
         logger.info(f"Published media group ({len(messages)} items)")

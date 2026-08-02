@@ -26,6 +26,7 @@ from config.settings import (
     SCRAPE_DELAY_SECONDS,
     SCRAPE_SECTIONS,
     SCRAPE_BASE_URL,
+    TELEGRAM_ADMIN_CHAT_ID,
 )
 from src.book_enricher import get_book_enrichment
 from src.media import download_first_image
@@ -153,7 +154,15 @@ async def run(dry_run: bool = False):
             logger.info("[Step 6/6] DRY RUN — skipping Telegram publish")
             message_id = "dry-run"
         else:
-            logger.info("[Step 6/6] Publishing to Telegram...")
+            if TELEGRAM_ADMIN_CHAT_ID:
+                logger.info("[Step 6/6] Sending preview to executor (admin chat)...")
+                await publish_post(
+                    text=post_text,
+                    image_path=image_path,
+                    use_html=False,  # Plain text — emojis don't need HTML
+                    chat_id=TELEGRAM_ADMIN_CHAT_ID,
+                )
+            logger.info("[Step 6/6] Publishing to Telegram group...")
             message_id = await publish_post(
                 text=post_text,
                 image_path=image_path,
