@@ -101,12 +101,23 @@ async def run(dry_run: bool = False):
         else:
             logger.info("[Step 3/6] Skipping book enrichment (random)")
 
-        # ── Step 4: Rewrite ──────────────────────────────────────────
-        logger.info("[Step 4/6] Rewriting via LLM...")
+        # ── Step 4: Media Selection ──────────────────────────────────
+        logger.info("[Step 4/6] Selecting topic-matched product image...")
+        image_path = await download_first_image(
+            article.images,
+            article.product_line,
+            title=article.title,
+        )
+        if image_path:
+            logger.info(f"Image ready: {image_path}")
+
+        # ── Step 5: Native Multimodal Rewrite via Gemini 3.6 Flash ────
+        logger.info("[Step 5/6] Generating post via Gemini 3.6 Flash (Multimodal)...")
         try:
             post_text = await rewrite_article(
                 article=article,
                 book_context=book_context,
+                image_path=image_path,
             )
         except RuntimeError as e:
             logger.error(f"Rewrite failed: {e}. Skipping article.")
@@ -114,14 +125,6 @@ async def run(dry_run: bool = False):
 
         logger.info(f"Generated post ({len(post_text)} chars):")
         logger.info(f"\n{post_text}\n")
-
-        # ── Step 5: Media ────────────────────────────────────────────
-        logger.info("[Step 5/6] Downloading product image...")
-        image_path = await download_first_image(article.images, article.product_line)
-        if image_path:
-            logger.info(f"Image ready: {image_path}")
-        else:
-            logger.info("No image available")
 
         # ── Step 6: Publish ──────────────────────────────────────────
         if dry_run:

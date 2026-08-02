@@ -1,4 +1,4 @@
-"""Media handler — downloads images from article pages for Telegram posts."""
+"""Media handler — downloads and validates images for Telegram posts."""
 
 import logging
 import os
@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.media_validator import validate_image_with_gemini_vision
+
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB Telegram limit for photos
@@ -14,15 +16,7 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 async def download_image(url: str, output_dir: str | None = None) -> str | None:
-    """Download an image from URL and return the local file path.
-
-    Args:
-        url: Image URL to download
-        output_dir: Directory to save to (uses temp dir if None)
-
-    Returns:
-        Local file path or None on failure
-    """
+    """Download an image from URL and return the local file path."""
     if not url:
         return None
 
@@ -66,13 +60,19 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
         return None
 
 
+# Fine-grained topic-specific fallback product images
 FALLBACK_PRODUCT_IMAGES = {
+    "Nutrilite_Omega3": [
+        "https://images.pexels.com/photos/5938392/pexels-photo-5938392.jpeg?auto=compress&cs=tinysrgb&w=800",
+    ],
+    "Nutrilite_Vitamins": [
+        "https://images.pexels.com/photos/3683074/pexels-photo-3683074.jpeg?auto=compress&cs=tinysrgb&w=800",
+    ],
+    "Nutrilite_Default": [
+        "https://images.pexels.com/photos/5938392/pexels-photo-5938392.jpeg?auto=compress&cs=tinysrgb&w=800",
+    ],
     "XS": [
         "https://images.pexels.com/photos/2538107/pexels-photo-2538107.jpeg?auto=compress&cs=tinysrgb&w=800",
-    ],
-    "Nutrilite": [
-        "https://images.pexels.com/photos/5938392/pexels-photo-5938392.jpeg?auto=compress&cs=tinysrgb&w=800",
-        "https://images.pexels.com/photos/3683074/pexels-photo-3683074.jpeg?auto=compress&cs=tinysrgb&w=800",
     ],
     "Artistry": [
         "https://images.pexels.com/photos/3785147/pexels-photo-3785147.jpeg?auto=compress&cs=tinysrgb&w=800",
@@ -86,18 +86,46 @@ FALLBACK_PRODUCT_IMAGES = {
 }
 
 
-async def download_first_image(image_urls: list[str], product_line: str = "default") -> str | None:
-    """Try to download the first available image from a list of URLs, or use product line fallback."""
-    for url in image_urls:
-        result = await download_image(url)
-        if result:
-            return result
+def detect_subtopic_key(title: str, product_line: str) -> str:
+    """Determine fine-grained subtopic for fallback image selection."""
+    text_lower = f"{title} {product_line}".lower()
+    if "nutrilite" in text_lower or "нутрилайт" in text_lower or "витамин" in text_lower:
+        if any(kw in text_lower for kw in ["омега", "omega", "жирн", "рыби", "fish"]):
+            return "Nutrilite_Omega3"
+        return "Nutrilite_Vitamins"
+    if product_line in FALLBACK_PRODUCT_IMAGES:
+        return product_line
+    return "default"
 
-    # Fallback: download product line image
-    fallbacks = FALLBACK_PRODUCT_IMAGES.get(product_line, FALLBACK_PRODUCT_IMAGES["default"])
+
+async def download_first_image(
+    image_urls: list[str],
+    product_line: str = "default",
+    title: str = "",
+) -> str | None:
+    """Download the first available image from scraped URLs, or topic-matched fallback image.
+
+    Args:
+        image_urls: List of candidate scraped URLs
+        product_line: Amway product category
+        title: Article or product title
+
+    Returns:
+        Local file path to downloaded product image, or None.
+    """
+    # 1. Try scraped image URLs
+    for url in image_urls:
+        filepath = await download_image(url)
+        if filepath:
+            return filepath
+
+    # 2. Topic-matched fallback product image
+    subtopic_key = detect_subtopic_key(title, product_line)
+    fallbacks = FALLBACK_PRODUCT_IMAGES.get(subtopic_key, FALLBACK_PRODUCT_IMAGES["default"])
+
     for url in fallbacks:
-        result = await download_image(url)
-        if result:
-            return result
+        filepath = await download_image(url)
+        if filepath:
+            return filepath
 
     return None

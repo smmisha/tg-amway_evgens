@@ -70,8 +70,26 @@ async def call_groq(system_prompt: str, user_prompt: str) -> str:
     raise RuntimeError("Groq API failed after retries")
 
 
-async def call_gemini(system_prompt: str, user_prompt: str) -> str:
-    """Call Gemini API with model fallback chain."""
+async def call_gemini(system_prompt: str, user_prompt: str, image_path: str | None = None) -> str:
+    """Call Gemini API with model fallback chain, supporting multimodal image input."""
+    from src.media_validator import encode_image_to_base64
+
+    parts = []
+    if image_path:
+        encoded = encode_image_to_base64(image_path)
+        if encoded:
+            mime_type, base64_data = encoded
+            parts.append({
+                "inline_data": {
+                    "mime_type": mime_type,
+                    "data": base64_data,
+                }
+            })
+            # Add instruction for image context
+            user_prompt = "ВНИМАНИЕ: Ознакомься с изображением выше. Напиши пост, который 100% визуально соотносится с этой картинкой и продуктом!\n\n" + user_prompt
+
+    parts.append({"text": user_prompt})
+
     for model in GEMINI_MODELS:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
@@ -79,7 +97,7 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
         )
         body = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": user_prompt}]}],
+            "contents": [{"parts": parts}],
             "generationConfig": {
                 "temperature": LLM_TEMPERATURE,
                 "maxOutputTokens": LLM_MAX_TOKENS,
@@ -87,36 +105,37 @@ async def call_gemini(system_prompt: str, user_prompt: str) -> str:
         }
 
         async with httpx.AsyncClient(timeout=60) as client:
-            for attempt in range(1, 3):
+            for attempt in range(1, 4):
                 try:
                     resp = await client.post(url, json=body)
                     data = resp.json()
                     if resp.status_code in (429, 503):
-                        logger.warning(f"Gemini {model} transient error (attempt {attempt})")
-                        await asyncio.sleep(3 * attempt)
+                        logger.warning(f"Gemini {model} rate limit (status {resp.status_code}, attempt {attempt}/3), waiting {25 * attempt}s...")
+                        await asyncio.sleep(25 * attempt)
                         continue
                     if "error" in data:
+                        logger.error(f"Gemini {model} error body: {data['error']}")
                         raise RuntimeError(f"Gemini error: {data['error']}")
                     candidates = data.get("candidates", [])
                     if candidates and candidates[0].get("content", {}).get("parts"):
                         return candidates[0]["content"]["parts"][0]["text"].strip()
                 except Exception as e:
                     logger.warning(f"Gemini {model} attempt {attempt} failed: {e}")
-                    if attempt < 2:
-                        await asyncio.sleep(2)
+                    if attempt < 3:
+                        await asyncio.sleep(5 * attempt)
         logger.warning(f"Model {model} exhausted, trying next...")
 
     raise RuntimeError("All Gemini models failed")
 
 
-async def call_llm(system_prompt: str, user_prompt: str) -> str:
+async def call_llm(system_prompt: str, user_prompt: str, image_path: str | None = None) -> str:
     """Call primary LLM based on LLM_PROVIDER setting, falling back to secondary."""
     primary = LLM_PROVIDER.lower() if LLM_PROVIDER else "gemini"
 
     if primary == "gemini":
         if GEMINI_API_KEY:
             try:
-                return await call_gemini(system_prompt, user_prompt)
+                return await call_gemini(system_prompt, user_prompt, image_path=image_path)
             except Exception as e:
                 logger.warning(f"Gemini failed: {e}")
                 if GROQ_API_KEY:
@@ -133,10 +152,10 @@ async def call_llm(system_prompt: str, user_prompt: str) -> str:
                 logger.warning(f"Groq failed: {e}")
                 if GEMINI_API_KEY:
                     logger.info("Falling back to Gemini...")
-                    return await call_gemini(system_prompt, user_prompt)
+                    return await call_gemini(system_prompt, user_prompt, image_path=image_path)
                 raise
         elif GEMINI_API_KEY:
-            return await call_gemini(system_prompt, user_prompt)
+            return await call_gemini(system_prompt, user_prompt, image_path=image_path)
 
     raise RuntimeError("No LLM API keys configured")
 
@@ -145,6 +164,7 @@ async def rewrite_article(
     article: Article,
     include_cta: bool | None = None,
     book_context: str | None = None,
+    image_path: str | None = None,
 ) -> str:
     """Rewrite an article in the Amway brand-ambassador style.
 
@@ -152,6 +172,7 @@ async def rewrite_article(
         article: Scraped article to rewrite
         include_cta: Force CTA on/off. None = random based on CTA_PROBABILITY
         book_context: Optional book enrichment context string
+        image_path: Optional path to validated product image for multimodal context
 
     Returns:
         Ready-to-publish post text
@@ -190,7 +211,7 @@ async def rewrite_article(
                 "без пояснений, без markdown, без рассуждений."
             )
 
-        result = await call_llm(system_prompt, prompt)
+        result = await call_llm(system_prompt, prompt, image_path=image_path)
 
         if not looks_like_model_artifact(result):
             # Valid post
