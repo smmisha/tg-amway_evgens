@@ -20,14 +20,14 @@ SCRAPE_DELAY_SECONDS = 10  # robots.txt: 1 request per 10 seconds
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_FALLBACK = os.getenv("LLM_FALLBACK", "groq")
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GEMINI_MODELS = ["gemini-3.6-flash"]
+GEMINI_MODELS = ["gemini-3.6-flash", "gemini-2.0-flash"]
 LLM_TEMPERATURE = 0.7
 LLM_MAX_TOKENS = 2048
 LLM_MAX_RETRIES = 3
 
 # Content settings
 POST_LANGUAGE = "ru"
-POST_MAX_LENGTH = 4096
+POST_MAX_LENGTH = 1000
 CTA_PROBABILITY = 0.6  # 60% of posts get CTA
 BOOK_ENRICHMENT_PROBABILITY = 0.3  # 30% of posts reference a book
 
