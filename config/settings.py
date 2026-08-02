@@ -42,7 +42,7 @@ BOOK_ENRICHMENT_PROBABILITY = 0.3  # 30% of posts reference a book
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # legacy: publish target
 TELEGRAM_ADMIN_CHAT_ID = os.getenv("TELEGRAM_ADMIN_CHAT_ID") or ""  # preview to executor
-TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID") or TELEGRAM_CHAT_ID  # publish target
+TELEGRAM_GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID") or TELEGRAM_ADMIN_CHAT_ID or TELEGRAM_CHAT_ID  # publish target
 
 # API keys
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
