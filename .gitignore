@@ -7,4 +7,3 @@ node_modules/
 *.log
 .pytest_cache/
 .chrome-profile/
-data/last_update_id.txt
