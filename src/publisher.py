@@ -57,21 +57,39 @@ async def publish_post(
 
     try:
         if image_path and os.path.exists(image_path):
-            # Send photo with caption
             with open(image_path, "rb") as photo:
-                message = await bot.send_photo(
-                    chat_id=TELEGRAM_CHAT_ID,
-                    photo=photo,
-                    caption=post_text[:1024],  # Telegram caption limit
-                    parse_mode=parse_mode,
-                )
-            logger.info(f"Published photo post. Message ID: {message.message_id}")
-            return str(message.message_id)
+                if len(post_text) <= 1024:
+                    message = await bot.send_photo(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        photo=photo,
+                        caption=post_text,
+                        parse_mode=parse_mode,
+                    )
+                    logger.info(f"Published photo post. Message ID: {message.message_id}")
+                    return str(message.message_id)
+                else:
+                    # Caption limit is 1024 for photos. Send photo with caption, then remaining text
+                    caption_text = post_text[:1020] + "..."
+                    message = await bot.send_photo(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        photo=photo,
+                        caption=caption_text,
+                        parse_mode=parse_mode,
+                    )
+                    # Send full text as continuation message
+                    cont_msg = await bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=post_text,
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=True,
+                    )
+                    logger.info(f"Published photo + full text post. Message ID: {cont_msg.message_id}")
+                    return str(cont_msg.message_id)
         else:
-            # Send text-only message
+            # Send text-only message (Telegram limit is 4096 chars)
             message = await bot.send_message(
                 chat_id=TELEGRAM_CHAT_ID,
-                text=post_text,
+                text=post_text[:4096],
                 parse_mode=parse_mode,
                 disable_web_page_preview=True,
             )
