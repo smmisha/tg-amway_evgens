@@ -28,6 +28,7 @@ from config.settings import (
     SCRAPE_BASE_URL,
     TELEGRAM_ADMIN_CHAT_ID,
     TELEGRAM_GROUP_CHAT_ID,
+    TELEGRAM_CHAT_ID,
 )
 from src.book_enricher import get_book_enrichment
 from src.media import download_first_image
@@ -46,6 +47,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _log_telegram_targets():
+    """Log the effective Telegram publish target to spot fallback problems."""
+    logger.info(
+        f"Telegram targets -> GROUP={TELEGRAM_GROUP_CHAT_ID or '(not set)'} "
+        f"| ADMIN={TELEGRAM_ADMIN_CHAT_ID or '(not set)'} "
+        f"| CHAT={TELEGRAM_CHAT_ID or '(not set)'}"
+    )
+    if not TELEGRAM_GROUP_CHAT_ID:
+        logger.error(
+            "TELEGRAM_GROUP_CHAT_ID is EMPTY in this environment -> posts will "
+            "fall back to ADMIN/CHAT chat, not the group. Update the GitHub "
+            "secret TELEGRAM_GROUP_CHAT_ID."
+        )
+
+
 async def run(dry_run: bool = False):
     """Execute the full pipeline."""
     logger.info("=" * 50)
@@ -54,6 +70,9 @@ async def run(dry_run: bool = False):
 
     storage = Storage(PUBLISHED_JSON)
     logger.info(f"Published articles in DB: {storage.count()}")
+
+    # ── Telegram target diagnostics ─────────────────────────────────────
+    _log_telegram_targets()
 
     # ── Step 1: Scrape ────────────────────────────────────────────────
     logger.info("\n[Step 1/6] Scraping amway.ua...")

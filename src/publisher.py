@@ -9,9 +9,38 @@ import os
 from telegram import Bot, InputMediaPhoto
 from telegram.constants import ParseMode
 
-from config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_CHAT_ID, TELEGRAM_CHAT_ID
+from config.settings import (
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_GROUP_CHAT_ID,
+    TELEGRAM_ADMIN_CHAT_ID,
+    TELEGRAM_CHAT_ID,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_target_chat(chat_id: str | None) -> str:
+    """Return the effective publish target chat id.
+    Resolution order (config/settings.py): explicit arg -> GROUP -> ADMIN -> CHAT.
+    """
+    if chat_id:
+        return chat_id
+    return TELEGRAM_GROUP_CHAT_ID or TELEGRAM_ADMIN_CHAT_ID or TELEGRAM_CHAT_ID or ""
+
+
+def _log_target(chat_id: str | None):
+    target = resolve_target_chat(chat_id)
+    source = "arg"
+    if not chat_id:
+        if TELEGRAM_GROUP_CHAT_ID:
+            source = "TELEGRAM_GROUP_CHAT_ID"
+        elif TELEGRAM_ADMIN_CHAT_ID:
+            source = "TELEGRAM_ADMIN_CHAT_ID (FALLBACK! GROUP not set)"
+        elif TELEGRAM_CHAT_ID:
+            source = "TELEGRAM_CHAT_ID (FALLBACK! GROUP/ADMIN not set)"
+        else:
+            source = "NOT SET"
+    logger.warning(f"Publish target chat_id={target!r} sourced from {source}")
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -46,10 +75,11 @@ async def publish_post(
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN is not set")
         return None
-    target_chat = chat_id or TELEGRAM_GROUP_CHAT_ID
+    target_chat = resolve_target_chat(chat_id)
     if not target_chat:
         logger.error("Telegram chat id is not set (TELEGRAM_GROUP_CHAT_ID)")
         return None
+    _log_target(chat_id)
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     parse_mode = ParseMode.HTML if use_html else None
@@ -127,10 +157,11 @@ async def publish_media_group(
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Telegram credentials not configured")
         return None
-    target_chat = chat_id or TELEGRAM_GROUP_CHAT_ID
+    target_chat = resolve_target_chat(chat_id)
     if not target_chat:
         logger.error("Telegram chat id is not set (TELEGRAM_GROUP_CHAT_ID)")
         return None
+    _log_target(chat_id)
 
     if not image_paths:
         return await publish_post(text)
