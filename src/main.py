@@ -69,22 +69,10 @@ async def run(dry_run: bool = False):
     logger.info(f"New articles after filtering: {len(new_articles)}")
 
     if not new_articles:
-        logger.info("No new scraped articles found. Falling back to Books Knowledge Bundle post...")
-        book_context = get_book_enrichment()
-        if not book_context:
-            logger.warning("No book context available for fallback. Exiting.")
-            return
+        logger.info("No new scraped articles found. Skipping run (no fallback posts).")
+        return
 
-        # Create a fallback synthetic article object for the book-based post
-        fallback_article = Article(
-            url=f"https://www.amway.ua/fallback-{random.randint(1000, 9999)}",
-            title="Советы по здоровью и уходу",
-            body="Инновационные решения Amway для здоровья, красоты и дома.",
-            product_line=random.choice(["Nutrilite", "Artistry", "XS", "Home Care"]),
-        )
-        selected = [fallback_article]
-    else:
-        selected = new_articles[:MAX_ARTICLES_PER_RUN]
+    selected = new_articles[:MAX_ARTICLES_PER_RUN]
 
     logger.info(f"Selected {len(selected)} items for processing")
 
