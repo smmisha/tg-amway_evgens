@@ -35,7 +35,7 @@ LLM_MAX_RETRIES = 3
 # Content settings
 POST_LANGUAGE = "ru"
 POST_MAX_LENGTH = 4096
-CTA_PROBABILITY = 0.6  # 60% of posts get CTA
+CTA_PROBABILITY = 1.0  # every post gets a CTA
 BOOK_ENRICHMENT_PROBABILITY = 0.3  # 30% of posts reference a book
 
 # Telegram settings

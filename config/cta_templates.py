@@ -7,7 +7,7 @@ CTA_TEMPLATES = [
     'Для заказа или быстрой консультации пишите @evgen_blago 📩',
     'Заказывайте на сайте → {url} или напишите @evgen_blago для оформления 🛒',
     'Пишите @evgen_blago слово "{keyword}" — помогу подобрать и сделаю отличные условия 👇',
-    'Кто хочет попробовать {product}? Напишите @evgen_blago — подберем лучшее решение 📲',
+    'Кто хочет попробовать {product}? Напишите @evgen_blago — подберу лучшее решение 📲',
 ]
 
 # Keywords for CTA templates that require them
