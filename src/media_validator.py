@@ -5,9 +5,12 @@ the specific product topic (e.g. Omega-3 vs skincare vs energy drink).
 """
 
 import base64
+import json
 import logging
-import os
 import mimetypes
+import os
+import re
+
 import httpx
 
 from config.settings import GEMINI_API_KEY, GEMINI_MODELS
@@ -129,17 +132,30 @@ async def validate_image_with_gemini_vision(
                     resp_text = parts[0].get("text", "").strip()
                     logger.info(f"Gemini Vision validation output: {resp_text}")
 
-                    import re
-                    is_approved = bool(re.search(r'"is_matching"\s*:\s*true', resp_text, re.IGNORECASE))
+                    parsed = _parse_validation_json(resp_text)
+                    if parsed is None:
+                        # Model didn't return a parsable JSON. Don't block a
+                        # valid post just because the model drifted from the
+                        # required format (same fail-open policy as API errors).
+                        logger.warning(
+                            f"Gemini Vision returned non-JSON for {os.path.basename(image_path)}; "
+                            f"approving by default (raw: {resp_text[:120]})"
+                        )
+                        return True
+
+                    is_approved = bool(parsed.get("is_matching", False))
                     if post_text:
                         is_approved = is_approved and bool(
-                            re.search(r'"text_ok"\s*:\s*true', resp_text, re.IGNORECASE)
+                            parsed.get("text_ok", False)
                         )
                     if is_approved:
                         logger.info(f"Image {os.path.basename(image_path)} APPROVED by Gemini Vision")
                         return True
                     else:
-                        logger.warning(f"Image {os.path.basename(image_path)} REJECTED by Gemini Vision: {resp_text}")
+                        reason = parsed.get("reason", "")
+                        logger.warning(
+                            f"Image {os.path.basename(image_path)} REJECTED by Gemini Vision: {reason or resp_text}"
+                        )
                         return False
 
     except Exception as e:
@@ -148,3 +164,38 @@ async def validate_image_with_gemini_vision(
         return True
 
     return True
+
+
+def _parse_validation_json(resp_text: str) -> dict | None:
+    """Best-effort parse of Gemini's reply into a dict with is_matching/text_ok.
+
+    Handles markdown code fences, stray prose around the JSON, and minor
+    formatting drift. Returns None when no valid JSON object can be found.
+    """
+    if not resp_text:
+        return None
+
+    text = resp_text.strip()
+    # 1) Drop markdown code fences
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+
+    # 2) Try the whole string as-is first
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except (ValueError, TypeError):
+        pass
+
+    # 3) Fall back to the first {...} block in the reply
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        obj = json.loads(match.group(0))
+        if isinstance(obj, dict):
+            return obj
+    except (ValueError, TypeError):
+        return None
+
+    return None
