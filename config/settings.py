@@ -27,7 +27,7 @@ LLM_MAX_RETRIES = 3
 
 # Content settings
 POST_LANGUAGE = "ru"
-POST_MAX_LENGTH = 1000
+POST_MAX_LENGTH = 4096
 CTA_PROBABILITY = 0.6  # 60% of posts get CTA
 BOOK_ENRICHMENT_PROBABILITY = 0.3  # 30% of posts reference a book
 
