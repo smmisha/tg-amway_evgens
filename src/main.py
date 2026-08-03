@@ -267,6 +267,124 @@ async def run(dry_run: bool = False):
         sys.exit(4)
 
 
+async def run_prepare():
+    """Scrape, generate, and vision-validate 1 post draft to store in prepared_posts.json."""
+    from config.settings import PREPARED_POSTS_JSON
+    from src.storage import PreparedStorage
+
+    logger.info("=" * 50)
+    logger.info("Amway Telegram Bot — starting PREPARE mode (draft generation)")
+    logger.info("=" * 50)
+
+    storage = Storage(PUBLISHED_JSON)
+    attempts = AttemptStorage(ATTEMPTED_JSON)
+    prepared = PreparedStorage(PREPARED_POSTS_JSON)
+
+    logger.info(f"Published in DB: {storage.count()} | Prepared in queue: {prepared.count()}")
+
+    articles = await scrape_amway(
+        sections=SCRAPE_SECTIONS,
+        base_url=SCRAPE_BASE_URL,
+        delay=SCRAPE_DELAY_SECONDS,
+        max_articles=CANDIDATE_POOL_SIZE * 2,
+    )
+    new_articles = [
+        a for a in articles
+        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
+    ]
+
+    if not new_articles:
+        logger.error("No fresh candidates for preparation. Skipping.")
+        sys.exit(2)
+
+    selected = new_articles[:CANDIDATE_POOL_SIZE]
+
+    for article in selected:
+        image_path = None
+        try:
+            book_context = get_book_enrichment() if random.random() < BOOK_ENRICHMENT_PROBABILITY else None
+            image_path = await download_first_image(article.images, article.product_line, title=article.title)
+            
+            post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
+            
+            if image_path:
+                vision_ok = await validate_image_with_gemini_vision(
+                    image_path=image_path,
+                    topic_title=article.title,
+                    product_line=article.product_line,
+                    post_text=post_text,
+                )
+                if not vision_ok:
+                    attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
+                    continue
+
+            # Save prepared draft
+            post_draft = {
+                "url": article.url,
+                "title": article.title,
+                "text": post_text,
+                "image_url": article.images[0] if article.images else "",
+                "product_line": article.product_line,
+            }
+            prepared.add_prepared(post_draft)
+            logger.info(f"Successfully prepared post draft: {article.title}")
+            logger.info(f"Prepared posts queue size: {prepared.count()}")
+            return
+        except Exception as e:
+            logger.warning(f"Preparation failed for {article.title}: {e}")
+            attempts.mark_attempted(article.url, reason=f"prepare_error: {e}")
+        finally:
+            cleanup_temp_media(image_path)
+
+    logger.error("Failed to prepare any post draft from pool.")
+    sys.exit(4)
+
+
+async def run_publish_prepared(dry_run: bool = False):
+    """Publish a prepared post from queue, or fallback to live pipeline if queue is empty."""
+    from config.settings import PREPARED_POSTS_JSON
+    from src.storage import PreparedStorage
+
+    logger.info("=" * 50)
+    logger.info("Amway Telegram Bot — starting PUBLISH-PREPARED mode")
+    logger.info("=" * 50)
+
+    prepared = PreparedStorage(PREPARED_POSTS_JSON)
+    storage = Storage(PUBLISHED_JSON)
+
+    post_draft = prepared.pop_prepared()
+    if not post_draft:
+        logger.warning("Prepared queue is empty. Falling back to live pipeline execution...")
+        await run(dry_run=dry_run)
+        return
+
+    logger.info(f"Publishing prepared post: {post_draft.get('title')}")
+    text = post_draft.get("text", "")
+    image_url = post_draft.get("image_url", "")
+    product_line = post_draft.get("product_line", "default")
+    url = post_draft.get("url", "")
+    title = post_draft.get("title", "")
+
+    image_path = None
+    if image_url:
+        image_path = await download_first_image([image_url], product_line=product_line, title=title)
+
+    try:
+        if dry_run:
+            logger.info("DRY RUN — prepared post would be published:")
+            logger.info(f"\n{text}\n")
+            message_id = "dry-run"
+        else:
+            message_id = await publish_post(text=text, image_path=image_path, use_html=False)
+            if not message_id:
+                raise RuntimeError("publish_post returned no message_id")
+            storage.mark_published(url=url, title=title, telegram_message_id=message_id)
+
+        logger.info(f"Successfully published prepared post (Message ID: {message_id})")
+    finally:
+        cleanup_temp_media(image_path)
+
+
 def main():
     if "--listen" in sys.argv:
         from src.bot_listener import run_bot_listener
@@ -276,8 +394,15 @@ def main():
     dry_run = "--dry-run" in sys.argv
     if dry_run:
         logger.info("Running in DRY RUN mode (no Telegram publishing)")
-    asyncio.run(run(dry_run=dry_run))
+
+    if "--prepare" in sys.argv:
+        asyncio.run(run_prepare())
+    elif "--publish-prepared" in sys.argv:
+        asyncio.run(run_publish_prepared(dry_run=dry_run))
+    else:
+        asyncio.run(run(dry_run=dry_run))
 
 
 if __name__ == "__main__":
     main()
+

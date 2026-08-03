@@ -1,13 +1,14 @@
-name: Amway Bot — Publish Posts
+name: Amway Bot — Prepare Posts (Daytime Drafts)
 
 on:
   schedule:
-    # Daily at 20:00 Kyiv time (17:00 UTC)
-    - cron: '0 17 * * *'
+    # 09:00 UTC = 12:00 Kyiv (summer UTC+3)
+    # 13:00 UTC = 16:00 Kyiv (summer UTC+3)
+    - cron: '0 9,13 * * *'
   workflow_dispatch: {}
 
 jobs:
-  publish:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -38,7 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable || true
 
-      - name: Run Amway bot (Publish Prepared / Live)
+      - name: Prepare post draft (with 3 retries)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -47,26 +48,24 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "Running scheduled publish from prepared queue..."
-            python -m src.main --publish-prepared
-          else
-            echo "Running manual live pipeline execution..."
-            xvfb-run -a python -m src.main
+          n=0
+          until [ "$n" -ge 3 ]
+          do
+             echo "Attempt $((n+1)) of 3..."
+             xvfb-run -a python -m src.main --prepare && break
+             n=$((n+1))
+             sleep 15
+          done
+          if [ "$n" -ge 3 ]; then
+             echo "All 3 preparation attempts failed."
+             exit 1
           fi
 
-      - name: Commit updated published.json
-        if: always()
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+      - name: Commit and push prepared state
         run: |
-          git config user.name "Amway Bot"
-          git config user.email "bot@github.com"
-          git add data/published.json data/attempted.json
-          git diff --staged --quiet || git commit -m "Update published articles [skip ci]"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
-          if [ -n "$GH_PAT" ]; then
-            git push "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
-          else
-            git push
-          fi
+          git add data/prepared_posts.json data/published.json data/attempted.json
+          git commit -m "chmod/data: update prepared post queue and tracking state" || echo "No changes to commit"
+          git push origin main

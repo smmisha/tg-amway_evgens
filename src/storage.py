@@ -133,3 +133,50 @@ class AttemptStorage:
 
     def count(self) -> int:
         return len(self._data)
+
+
+class PreparedStorage:
+    """JSON-file queue for pre-scraped, pre-rewritten, and vision-validated post drafts."""
+
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self._data: list[dict] = []
+        self._load()
+
+    def _load(self):
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    self._data = json.loads(content) if content else []
+            except (json.JSONDecodeError, IOError):
+                self._data = []
+        else:
+            self._data = []
+
+    def _save(self):
+        dirname = os.path.dirname(self.filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        with open(self.filepath, "w", encoding="utf-8") as f:
+            json.dump(self._data, f, ensure_ascii=False, indent=2)
+
+    def add_prepared(self, post_data: dict):
+        """Add a validated post draft to the prepared queue."""
+        # Avoid duplicate entries for the same URL in prepared queue
+        self._data = [item for item in self._data if item.get("url") != post_data.get("url")]
+        post_data["prepared_at"] = datetime.now(timezone.utc).isoformat()
+        self._data.append(post_data)
+        self._save()
+
+    def pop_prepared(self) -> dict | None:
+        """Pop and return the oldest prepared post draft from the queue."""
+        if not self._data:
+            return None
+        post = self._data.pop(0)
+        self._save()
+        return post
+
+    def count(self) -> int:
+        return len(self._data)
+
