@@ -77,16 +77,20 @@ def _is_article_like(href: str) -> bool:
 
 
 async def _launch_browser(p, profile_dir: str):
-    """Launch real headful Chrome/Edge with a persistent profile.
-
-    A persistent context is required: the DataDome cookie is stored in the
-    profile dir and reused across runs. Without it the site re-challenges
-    every time (and repeated automation attempts can flag the IP).
-    """
+    """Launch real headful Chrome/Edge with a persistent profile and stealth options."""
     from config import settings
 
     channels = settings.CHROME_CHANNELS
     last_err = None
+    extra_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-infobars",
+        "--window-position=0,0",
+        "--ignore-certificate-errors",
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    ]
     for channel in channels:
         try:
             context = await p.chromium.launch_persistent_context(
@@ -95,8 +99,14 @@ async def _launch_browser(p, profile_dir: str):
                 channel=channel,
                 viewport={"width": 1280, "height": 900},
                 locale="uk-UA",
-                args=["--disable-blink-features=AutomationControlled"],
+                args=extra_args,
             )
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['uk-UA', 'uk', 'ru-RU', 'ru', 'en-US', 'en']});
+                window.chrome = { runtime: {} };
+            """)
             logger.info(f"Browser launched (channel={channel}, headful, profile={profile_dir})")
             return context
         except Exception as e:
@@ -110,12 +120,16 @@ async def _wait_until_ready(page, min_links: int, timeout_ms: int) -> None:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_ms / 1000
     while loop.time() < deadline:
+        try:
+            await page.mouse.wheel(0, 300)
+        except Exception:
+            pass
         count = await page.eval_on_selector_all(
             "a[href]", "els => els.filter(el => el.href).length"
         )
         if count >= min_links:
             return
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
     logger.warning("Timed out waiting for page content (DataDome challenge unresolved?)")
 
 
