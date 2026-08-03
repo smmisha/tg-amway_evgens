@@ -17,6 +17,7 @@ missed them. We now read `meta[property='og:image']` first, then fall back to
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
