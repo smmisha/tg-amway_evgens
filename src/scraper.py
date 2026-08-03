@@ -313,8 +313,8 @@ async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.u
                         f"{len(category_links)} category links in {section_path}"
                     )
 
-                    # Discover /p/ links from category pages if needed
-                    if not product_links and category_links:
+                    # Discover /p/ links from category pages
+                    if category_links:
                         for cat_url in category_links[:3]:
                             if len(articles) >= max_articles:
                                 break

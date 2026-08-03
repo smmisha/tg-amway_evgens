@@ -9,9 +9,9 @@ SCRAPE_BASE_URL = "https://www.amway.ua"
 SCRAPE_SECTIONS = [
     "/uk/",
     "/uk/expert-advice",
-    "/uk/c/health",
-    "/uk/c/beauty",
-    "/uk/c/home-care",
+    "/uk/Health/c/10003",
+    "/uk/Artistry/c/10002",
+    "/uk/Home/c/10001",
 ]
 MAX_ARTICLES_PER_RUN = 1  # goal: one published post per run/day
 CANDIDATE_POOL_SIZE = 8  # how many fresh candidates we try before giving up the run
