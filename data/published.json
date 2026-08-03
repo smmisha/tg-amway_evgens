@@ -7,6 +7,13 @@
     "published_at": "2026-08-02T23:41:01.091516+00:00"
   },
   {
+    "hash": "0fa51d2b91cbdcd5",
+    "url": "https://www.amway.ua/uk/product/nutrilite-omega3-complex",
+    "title": "Nutrilite Омега-3 Комплекс — незамінні жирні кислоти EPA та DHA",
+    "telegram_message_id": "6",
+    "published_at": "2026-08-03T01:27:58.468891+00:00"
+  },
+  {
     "hash": "90b04aff462e6ab7",
     "url": "https://www.amway.ua/nutrilite-kompleks-omega-3-nutrilite/p/4298",
     "title": "Nutrilite Омега-3 Комплекс — незамінні жирні кислоти EPA та DHA",
@@ -103,5 +110,12 @@
     "title": "Nutrilite Вітамін D — щоденна підтримка імунітету",
     "telegram_message_id": "20",
     "published_at": "2026-08-03T15:54:18.605633+00:00"
+  },
+  {
+    "hash": "0df8095bcfc6f3df",
+    "url": "https://www.amway.ua/uk/product/nutrilite-vitamin-c-plus",
+    "title": "Nutrilite Вітамін C Плюс — пролонговане вивільнення 24/7",
+    "telegram_message_id": "21",
+    "published_at": "2026-08-03T18:43:27.701926+00:00"
   }
 ]
