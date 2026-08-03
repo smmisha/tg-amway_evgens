@@ -419,5 +419,35 @@ async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.u
     except Exception as e:
         logger.error(f"Playwright error: {e}")
 
+    # Fallback to rich products catalog if live scraping yielded fewer articles than max_articles
+    if len(articles) < max_articles:
+        logger.info(f"Scraped {len(articles)} live articles. Loading product catalog fallback...")
+        scraped_urls = {a.url for a in articles}
+        catalog_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "products_catalog.json"
+        )
+        if os.path.exists(catalog_file):
+            try:
+                with open(catalog_file, "r", encoding="utf-8") as f:
+                    catalog_data = json.load(f)
+                for item in catalog_data:
+                    if len(articles) >= max_articles:
+                        break
+                    url = item.get("url", "")
+                    if url in scraped_urls:
+                        continue
+                    articles.append(Article(
+                        url=url,
+                        title=item.get("title", ""),
+                        body=item.get("body", ""),
+                        images=item.get("images", []),
+                        category=item.get("category", "catalog"),
+                        product_line=item.get("product_line", detect_product_line(item.get("title", ""))),
+                    ))
+                    scraped_urls.add(url)
+                    logger.info(f"Loaded from catalog: {item.get('title')} [{item.get('product_line')}]")
+            except Exception as e:
+                logger.warning(f"Failed to load products catalog: {e}")
+
     logger.info(f"Total articles scraped: {len(articles)}")
     return articles
