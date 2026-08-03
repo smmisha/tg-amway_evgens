@@ -5,25 +5,15 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from config.settings import TELEGRAM_BOT_TOKEN
+from config.prompts import START_RESPONSE
 
 logger = logging.getLogger(__name__)
-
-START_RESPONSE_TEXT = """
-Привет! 🌿 Добро пожаловать в Amway Daily!
-
-Здесь я публикую свежие обзоры продуктов Amway — XS, Nutrilite, Artistry и Home Care: состав, польза и мой личный опыт. 💪
-
-Для заказа, консультации или оформления персональной скидки пишите напрямую:
-👉 @evgen_blago
-
-📲 Подберу лучшее решение под ваши задачи!
-""".strip()
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command in private chat."""
     if update.message:
-        await update.message.reply_text(START_RESPONSE_TEXT)
+        await update.message.reply_text(START_RESPONSE)
 
 
 def run_bot_listener():

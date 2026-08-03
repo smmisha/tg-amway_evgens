@@ -67,14 +67,19 @@ def build_book_context(book: dict, hook_type: str) -> str:
 
     cases = book.get("key_experiments_and_cases", [])
     cases_summary = "\n".join(
-        f"- {c['title']}: {c['summary']} (Вывод: {c.get('takeaway_for_threads', '')})"
+        f"- {c.get('title', '')}: {c.get('summary', '')} (Вывод: {c.get('takeaway_for_threads', '')})"
         for c in cases
+        if isinstance(c, dict)
     )
+
+    title_ru = book.get("title_ru", book.get("title", "Книга"))
+    author = book.get("author", "Неизвестный автор")
+    core_concept = book.get("core_concept", "")
 
     return f"""
 ОБОГАЩЕНИЕ ЧЕРЕЗ КНИГУ:
-КНИГА: "{book['title_ru']}" ({book['author']})
-СУТЬ: {book['core_concept']}
+КНИГА: "{title_ru}" ({author})
+СУТЬ: {core_concept}
 МЕХАНИЗМЫ: {', '.join(book.get('mechanisms', []))}
 
 КЕЙСЫ И ЭКСПЕРИМЕНТЫ:
@@ -96,5 +101,6 @@ def get_book_enrichment() -> str | None:
         return None
 
     book, hook_type = result
-    logger.info(f"Book enrichment: \"{book['title_ru']}\" [{hook_type}]")
+    title_ru = book.get("title_ru", book.get("title", "Книга"))
+    logger.info(f"Book enrichment: \"{title_ru}\" [{hook_type}]")
     return build_book_context(book, hook_type)

@@ -13,6 +13,7 @@ import os
 import httpx
 
 from config.settings import TELEGRAM_BOT_TOKEN
+from config.prompts import START_RESPONSE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,15 +21,6 @@ logger = logging.getLogger(__name__)
 LAST_UPDATE_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "last_update_id.txt",
-)
-
-START_RESPONSE = (
-    "Привет! 🌿 Добро пожаловать в Amway Daily!\n\n"
-    "Здесь я публикую свежие обзоры продуктов Amway — XS, Nutrilite, "
-    "Artistry и Home Care: состав, польза и мой личный опыт. 💪\n\n"
-    "Для заказа, консультации или оформления персональной скидки пишите напрямую:\n"
-    "👉 @evgen_blago\n\n"
-    "📲 Подберу лучшее решение под ваши задачи!"
 )
 
 

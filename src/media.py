@@ -1,5 +1,6 @@
 """Media handler — downloads and validates images for Telegram posts."""
 
+import hashlib
 import logging
 import os
 import tempfile
@@ -28,7 +29,8 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
             output_dir = tempfile.mkdtemp(prefix="amway_media_")
         os.makedirs(output_dir, exist_ok=True)
 
-        filename = f"image_{hash(url) & 0xFFFFFFFF:08x}{ext}"
+        url_hash = hashlib.md5(url.encode("utf-8")).hexdigest()[:8]
+        filename = f"image_{url_hash}{ext}"
         filepath = os.path.join(output_dir, filename)
 
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:

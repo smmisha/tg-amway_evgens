@@ -3,7 +3,7 @@
 Voice system architecture copied from threads/voice.js and adapted for Amway brand-ambassador TOV.
 """
 
-# ── Modular voice blocks (architecture from voice.js) ────────────────────
+# -- Modular voice blocks (architecture from voice.js) --------------------
 
 VOICE_CORE = """
 ГОЛОС АВТОРА (Евгений — мужчина):
@@ -43,7 +43,7 @@ ANTI_PATTERNS = """
 - Обезличенный тон новостной ленты без своей позиции.
 """.strip()
 
-# ── Pre-publication validation (Gemini, mandatory check) ─────────────────
+# -- Pre-publication validation (Gemini, mandatory check) -----------------
 
 VALIDATION_SYSTEM_INSTRUCTION = """
 СИСТЕМНАЯ ИНСТРУКЦИЯ: ПРОВЕРКА ТЕКСТА ПЕРЕД ПУБЛИКАЦИЕЙ
@@ -87,11 +87,11 @@ VALIDATION_SYSTEM_INSTRUCTION = """
   «…причина попробовать 😍\n\nПишите @evgen_blago — подберу лучшее решение 📲\n\n#Artistry #Amway»
 """.strip()
 
-# ── Assembled voice for different scenarios ───────────────────────────────
+# -- Assembled voice for different scenarios -------------------------------
 
 VOICE_FOR_POST = "\n\n".join([VOICE_CORE, TYPOGRAPHY, POST_FORMAT, ANTI_PATTERNS])
 
-# ── Main rewriter system instruction ─────────────────────────────────────
+# -- Main rewriter system instruction -------------------------------------
 
 REWRITER_SYSTEM_INSTRUCTION = f"""
 Ты — админ Telegram-группы, мужского пола (Евгений), топ-продавец и бренд-амбассадор Amway.
@@ -112,7 +112,7 @@ REWRITER_SYSTEM_INSTRUCTION = f"""
 {VOICE_FOR_POST}
 """
 
-# ── Book-enriched post system instruction ────────────────────────────────
+# -- Book-enriched post system instruction --------------------------------
 
 BOOK_ENRICHED_SYSTEM_INSTRUCTION = f"""
 Ты — админ Telegram-группы (Евгений, мужчина), топ-продавец Amway и эксперт по психологии продаж.
@@ -133,26 +133,13 @@ BOOK_ENRICHED_SYSTEM_INSTRUCTION = f"""
 {VOICE_FOR_POST}
 """
 
-# ── Humanizer system instruction (from publish.js) ───────────────────────
+# -- Telegram bot /start response ------------------------------------------
 
-HUMANIZER_SYSTEM_INSTRUCTION = f"""
-You are an expert editor. Your task is to rewrite the input text to make it sound
-completely human-written, natural, and engaging for Russian-speaking Telegram users.
-
-1. PERSONALITY AND VOICE:
-- Write strictly in first person MALE gender ("я", "заметил", "проверил", "попробовал").
-- Tone: brand ambassador, warm, energetic.
-- Vary sentence length. Short punchy + longer ones.
-
-2. STRICT ANTI-AI PATTERNS (AVOID IN RUSSIAN):
-- Never use: «важно отметить», «в современном мире», «стремительно развивающийся»,
-  «ландшафт», «экосистема», «уникальный», «ключевой», «стоит подчеркнуть».
-- Avoid: «служит в качестве», «выступает в роли», «представляет собой».
-- Avoid: «это не просто X, это Y».
-
-3. FORMAT:
-- Output pure text ready to post. No introductions like «Вот ваш текст:».
-- Russian language only.
-
-{VOICE_FOR_POST}
-"""
+START_RESPONSE = (
+    "Привет! 🌿 Добро пожаловать в Amway Daily!\n\n"
+    "Здесь я публикую свежие обзоры продуктов Amway — XS, Nutrilite, "
+    "Artistry и Home Care: состав, польза и мой личный опыт. 💪\n\n"
+    "Для заказа, консультации или оформления персональной скидки пишите напрямую:\n"
+    "👉 @evgen_blago\n\n"
+    "📲 Подберу лучшее решение под ваши задачи!"
+)

@@ -107,8 +107,9 @@ async def _launch_browser(p, profile_dir: str):
 
 async def _wait_until_ready(page, min_links: int, timeout_ms: int) -> None:
     """Wait for DataDome's JS challenge to resolve (content starts appearing)."""
-    deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
-    while asyncio.get_event_loop().time() < deadline:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_ms / 1000
+    while loop.time() < deadline:
         count = await page.eval_on_selector_all(
             "a[href]", "els => els.filter(el => el.href).length"
         )
