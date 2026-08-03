@@ -19,8 +19,7 @@ import asyncio
 import logging
 import sys
 
-from telegram import Update
-from telegram import Bot
+from telegram import Bot, Chat, Update
 from telegram.constants import UpdateType
 
 from config.settings import TELEGRAM_BOT_TOKEN

@@ -165,7 +165,7 @@ async def call_llm(system_prompt: str, user_prompt: str, image_path: str | None 
     raise RuntimeError("No LLM API keys configured")
 
 
-async def validate_with_gemini(post_text: str) -> str:
+async def validate_with_gemini(post_text: str, product_line: str = "default") -> str:
     """Strictly check and fix the post with Gemini before publishing.
 
     Runs the full pre-publication checklist (language purity, duplication,
@@ -198,13 +198,11 @@ async def validate_with_gemini(post_text: str) -> str:
             )
         except Exception as e:
             logger.warning(f"Gemini validation attempt {attempt} failed: {e}")
-            if GEMINI_API_KEY:
-                await asyncio.sleep(2 * attempt)
+            await asyncio.sleep(2 * attempt)
 
     logger.error("Gemini validation could not fix post ending. Appending CTA manually.")
     from config.cta_templates import get_cta
 
-    product_line = "default"
     cta = get_cta(product_line=product_line)
     return f"{post_text.rstrip()}\n\n{cta}\n\n#Amway"
 
@@ -273,7 +271,7 @@ async def rewrite_article(
             if len(result) > POST_MAX_LENGTH:
                 result = result[:POST_MAX_LENGTH - 3] + "..."
             # Strict pre-publication check by Gemini (fixes language/typo/tone)
-            result = await validate_with_gemini(result)
+            result = await validate_with_gemini(result, product_line=article.product_line)
             return result
 
         if attempt < LLM_MAX_RETRIES:

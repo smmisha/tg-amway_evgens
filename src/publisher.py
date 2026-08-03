@@ -55,6 +55,51 @@ def escape_markdown_v2(text: str) -> str:
     return escaped
 
 
+def _truncate_preserving_tail(text: str, max_len: int = 1000) -> str:
+    """Truncate text to max_len while keeping the CTA and hashtag tail intact."""
+    if len(text) <= max_len:
+        return text
+
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    tail_paragraphs = []
+    
+    # Identify tail paragraphs (hashtags and/or @evgen_blago CTA)
+    while paragraphs:
+        last = paragraphs[-1]
+        if "@evgen_blago" in last or "#" in last:
+            tail_paragraphs.insert(0, paragraphs.pop())
+        else:
+            break
+
+    tail = "\n\n".join(tail_paragraphs) if tail_paragraphs else ""
+    body = "\n\n".join(paragraphs) if paragraphs else text
+
+    # Reserve space for tail and separator/ellipsis
+    reserved_space = len(tail) + (4 if tail else 0) + 3
+    max_body_len = max_len - reserved_space
+
+    if max_body_len > 100 and len(body) > max_body_len:
+        trimmed_body = body[:max_body_len]
+        last_end = max(
+            trimmed_body.rfind("."),
+            trimmed_body.rfind("!"),
+            trimmed_body.rfind("?"),
+            trimmed_body.rfind("\n"),
+        )
+        if last_end > 100:
+            body = trimmed_body[: last_end + 1]
+        else:
+            last_space = trimmed_body.rfind(" ")
+            if last_space > 100:
+                body = trimmed_body[:last_space] + "..."
+            else:
+                body = trimmed_body + "..."
+
+    if tail:
+        return f"{body}\n\n{tail}"
+    return body
+
+
 async def publish_post(
     text: str,
     image_path: str | None = None,
@@ -105,15 +150,8 @@ async def publish_post(
                     logger.info(f"Published photo post. Message ID: {message.message_id}")
                     return str(message.message_id)
                 else:
-                    # Truncate cleanly at last full sentence or space boundary before 950 chars
-                    caption_text = final_text[:950]
-                    last_end = max(caption_text.rfind("."), caption_text.rfind("!"), caption_text.rfind("?"), caption_text.rfind("\n"))
-                    if last_end > 200:
-                        caption_text = caption_text[:last_end + 1]
-                    else:
-                        last_space = caption_text.rfind(" ")
-                        if last_space > 200:
-                            caption_text = caption_text[:last_space] + "..."
+                    # Extract the CTA/hashtag tail so it survives truncation
+                    caption_text = _truncate_preserving_tail(final_text, max_len=1000)
 
                     message = await bot.send_photo(
                         chat_id=target_chat,
@@ -136,7 +174,7 @@ async def publish_post(
 
     except Exception as e:
         logger.error(f"Failed to publish to Telegram: {e}")
-        return None
+        raise
 
 
 async def publish_media_group(

@@ -26,7 +26,7 @@ CHROME_CHANNELS = ["chrome", "msedge", None]
 SCRAPE_WAIT_TIMEOUT_MS = 25000  # how long to wait for DataDome challenge to resolve
 
 # LLM settings
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_FALLBACK = os.getenv("LLM_FALLBACK", "groq")
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_MODELS = ["gemini-3.6-flash"]

@@ -32,7 +32,9 @@ class Storage:
             self._data = []
 
     def _save(self):
-        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+        dirname = os.path.dirname(self.filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         # Keep only last 500 entries
         trimmed = self._data[-500:]
         with open(self.filepath, "w", encoding="utf-8") as f:
@@ -87,7 +89,9 @@ class AttemptStorage:
             self._data = []
 
     def _save(self):
-        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+        dirname = os.path.dirname(self.filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         trimmed = self._data[-2000:]
         with open(self.filepath, "w", encoding="utf-8") as f:
             json.dump(trimmed, f, ensure_ascii=False, indent=2)
