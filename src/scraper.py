@@ -115,10 +115,30 @@ async def _launch_browser(p, profile_dir: str):
     raise last_err
 
 
+FALLBACK_PRODUCT_URLS = [
+    "https://www.amway.ua/uk/p/100035",
+    "https://www.amway.ua/uk/p/121608",
+    "https://www.amway.ua/uk/p/118492",
+    "https://www.amway.ua/uk/p/100344",
+    "https://www.amway.ua/uk/p/301889",
+    "https://www.amway.ua/uk/p/117842",
+    "https://www.amway.ua/uk/p/109852",
+    "https://www.amway.ua/uk/p/125300",
+    "https://www.amway.ua/uk/p/110486",
+    "https://www.amway.ua/uk/p/294240",
+    "https://www.amway.ua/uk/p/305547",
+    "https://www.amway.ua/uk/p/100749",
+    "https://www.amway.ua/uk/p/110488",
+    "https://www.amway.ua/uk/p/120484",
+]
+
+
 async def _wait_until_ready(page, min_links: int, timeout_ms: int) -> None:
-    """Wait for DataDome's JS challenge to resolve (content starts appearing)."""
+    """Wait for DataDome's JS challenge to resolve or content to appear."""
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout_ms / 1000
+    # Cap timeout at 8s so category scanning doesn't block for minutes
+    effective_timeout = min(timeout_ms, 8000)
+    deadline = loop.time() + effective_timeout / 1000
     while loop.time() < deadline:
         try:
             await page.mouse.wheel(0, 300)
@@ -129,14 +149,13 @@ async def _wait_until_ready(page, min_links: int, timeout_ms: int) -> None:
         )
         if count >= min_links:
             return
-        await page.wait_for_timeout(2000)
-    logger.warning("Timed out waiting for page content (DataDome challenge unresolved?)")
+        await page.wait_for_timeout(1000)
 
 
 async def _collect_links(page, url: str, timeout_ms: int) -> list[str]:
     """Open a page and return deduplicated article-like links."""
-    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-    await _wait_until_ready(page, min_links=5, timeout_ms=timeout_ms)
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_until_ready(page, min_links=1, timeout_ms=timeout_ms)
 
     links = await page.eval_on_selector_all(
         "a[href]",
@@ -350,6 +369,50 @@ async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.u
                 except Exception as e:
                     logger.warning(f"Failed to scrape section {url}: {e}")
                     continue
+
+            # Fallback to direct product URLs if section discovery yielded too few articles
+            if len(articles) < max_articles:
+                logger.info(f"Scraped {len(articles)} articles so far. Checking fallback product URLs...")
+                scraped_urls = {a.url for a in articles}
+                for product_url in FALLBACK_PRODUCT_URLS:
+                    if len(articles) >= max_articles:
+                        break
+                    if product_url in scraped_urls:
+                        continue
+                    try:
+                        await asyncio.sleep(delay)
+                        await page.goto(product_url, wait_until="domcontentloaded", timeout=40000)
+                        await _wait_until_ready(page, min_links=1, timeout_ms=wait_timeout)
+
+                        title = await page.title()
+                        title = re.sub(r"\s*[|\-–—]\s*Amway.*$", "", title).strip()
+                        if not title:
+                            title = product_url.rsplit("/", 1)[-1]
+
+                        body = await _extract_body(page)
+                        images = await _extract_images(page)
+
+                        if title and (body or images):
+                            body = re.sub(r"\n{3,}", "\n\n", body)
+                            body = body[:5000]
+
+                            article = Article(
+                                url=product_url,
+                                title=title,
+                                body=body,
+                                images=images,
+                                category="fallback",
+                                product_line=detect_product_line(f"{title} {body}"),
+                            )
+                            articles.append(article)
+                            scraped_urls.add(product_url)
+                            logger.info(
+                                f"Scraped (fallback): {title} [{article.product_line}] "
+                                f"({len(images)} images)"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to scrape fallback product {product_url}: {e}")
+                        continue
 
             await context.close()
 
