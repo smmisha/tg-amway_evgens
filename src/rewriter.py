@@ -95,21 +95,21 @@ async def call_gemini(system_prompt: str, user_prompt: str, image_path: str | No
 
     parts.append({"text": user_prompt})
 
-    for model in GEMINI_MODELS:
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-            f":generateContent?key={GEMINI_API_KEY}"
-        )
-        body = {
-            "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": parts}],
-            "generationConfig": {
-                "temperature": LLM_TEMPERATURE,
-                "maxOutputTokens": LLM_MAX_TOKENS,
-            },
-        }
+    async with httpx.AsyncClient(timeout=60) as client:
+        for model in GEMINI_MODELS:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+                f":generateContent?key={GEMINI_API_KEY}"
+            )
+            body = {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": LLM_TEMPERATURE,
+                    "maxOutputTokens": LLM_MAX_TOKENS,
+                },
+            }
 
-        async with httpx.AsyncClient(timeout=60) as client:
             for attempt in range(1, 4):
                 try:
                     resp = await client.post(url, json=body)
@@ -128,7 +128,7 @@ async def call_gemini(system_prompt: str, user_prompt: str, image_path: str | No
                     logger.warning(f"Gemini {model} attempt {attempt} failed: {e}")
                     if attempt < 3:
                         await asyncio.sleep(5 * attempt)
-        logger.warning(f"Model {model} exhausted, trying next...")
+            logger.warning(f"Model {model} exhausted, trying next...")
 
     raise RuntimeError("All Gemini models failed")
 

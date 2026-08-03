@@ -44,7 +44,7 @@ def _log_target(chat_id: str | None):
 
 
 def escape_markdown_v2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
+    """Escape special characters for Telegram MarkdownV2 (utility for MarkdownV2 formatting)."""
     special_chars = r"_*[]()~`>#+-=|{}.!"
     escaped = ""
     for char in text:

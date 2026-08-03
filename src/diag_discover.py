@@ -69,7 +69,7 @@ async def main() -> int:
     logger.info(f"Bot: @{me.username} name={me.first_name!r} — reading up to {limit} updates…")
 
     try:
-        updates = await bot.get_updates(limit=10, allowed_updates=(
+        updates = await bot.get_updates(limit=min(limit, 100), allowed_updates=(
             UpdateType.MESSAGE,
             UpdateType.CHANNEL_POST,
             UpdateType.MY_CHAT_MEMBER,
@@ -84,7 +84,6 @@ async def main() -> int:
         logger.info("If the bot was already added earlier, its update has expired — re-add it or post again.")
         return 0
 
-    printed = set()
     for upd in updates:
         try:
             _extract(upd)

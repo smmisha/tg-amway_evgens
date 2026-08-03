@@ -29,7 +29,8 @@ LINK_SELECTOR = "a[href*='/p/'], a[href*='/c/'], a[href*='/article']"
 
 async def get_ip() -> str:
     try:
-        return (await httpx.AsyncClient(timeout=20).get("https://api.ipify.org")).text
+        async with httpx.AsyncClient(timeout=20) as client:
+            return (await client.get("https://api.ipify.org")).text
     except Exception as e:
         return f"ipify failed: {e}"
 

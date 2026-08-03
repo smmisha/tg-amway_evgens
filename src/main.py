@@ -83,7 +83,7 @@ async def run(dry_run: bool = False):
     _log_telegram_targets()
 
     # ── Step 1: Scrape ────────────────────────────────────────────────
-    logger.info("\n[Step 1/6] Scraping amway.ua...")
+    logger.info("\n[Step 1/7] Scraping amway.ua...")
     articles = await scrape_amway(
         sections=SCRAPE_SECTIONS,
         base_url=SCRAPE_BASE_URL,
@@ -92,6 +92,8 @@ async def run(dry_run: bool = False):
     )
     logger.info(f"Scraped {len(articles)} articles")
 
+    # ── Step 2: Filter ────────────────────────────────────────────────
+    logger.info("[Step 2/7] Filtering candidates...")
     new_articles = [
         a
         for a in articles
@@ -128,13 +130,13 @@ async def run(dry_run: bool = False):
             # ── Step 3: Book Enrichment (30% chance) ─────────────────────
             book_context = None
             if random.random() < BOOK_ENRICHMENT_PROBABILITY:
-                logger.info("[Step 3/6] Adding book enrichment...")
+                logger.info("[Step 3/7] Adding book enrichment...")
                 book_context = get_book_enrichment()
             else:
-                logger.info("[Step 3/6] Skipping book enrichment (random)")
+                logger.info("[Step 3/7] Skipping book enrichment (random)")
 
             # ── Step 4: Media Selection ──────────────────────────────────
-            logger.info("[Step 4/6] Selecting topic-matched product image...")
+            logger.info("[Step 4/7] Selecting topic-matched product image...")
             try:
                 image_path = await download_first_image(
                     article.images,
@@ -151,7 +153,7 @@ async def run(dry_run: bool = False):
                 logger.info(f"Image ready: {image_path}")
 
             # ── Step 5: Native Multimodal Rewrite via Gemini 3.6 Flash ────
-            logger.info("[Step 5/6] Generating post via Gemini 3.6 Flash (Multimodal)...")
+            logger.info("[Step 5/7] Generating post via Gemini 3.6 Flash (Multimodal)...")
             try:
                 post_text = await rewrite_article(
                     article=article,
@@ -170,7 +172,7 @@ async def run(dry_run: bool = False):
 
             # ── Step 5.5: Gemini "eyes" — check image + text together ──────
             if image_path:
-                logger.info("[Step 5.5/6] Gemini visually checking image + text...")
+                logger.info("[Step 5.5/7] Gemini visually checking image + text...")
                 try:
                     vision_ok = await validate_image_with_gemini_vision(
                         image_path=image_path,
@@ -197,21 +199,21 @@ async def run(dry_run: bool = False):
 
             # ── Step 6: Publish ──────────────────────────────────────────
             if dry_run:
-                logger.info("[Step 6/6] DRY RUN — skipping Telegram publish")
+                logger.info("[Step 6/7] DRY RUN — skipping Telegram publish")
                 message_id = "dry-run"
             else:
                 needs_preview = (
                     TELEGRAM_ADMIN_CHAT_ID and TELEGRAM_GROUP_CHAT_ID != TELEGRAM_ADMIN_CHAT_ID
                 )
                 if needs_preview:
-                    logger.info("[Step 6/6] Sending preview to executor (admin chat)...")
+                    logger.info("[Step 6/7] Sending preview to executor (admin chat)...")
                     await publish_post(
                         text=post_text,
                         image_path=image_path,
                         use_html=False,  # Plain text — emojis don't need HTML
                         chat_id=TELEGRAM_ADMIN_CHAT_ID,
                     )
-                logger.info("[Step 6/6] Publishing to Telegram group...")
+                logger.info("[Step 6/7] Publishing to Telegram group...")
                 try:
                     message_id = await publish_post(
                         text=post_text,
@@ -234,6 +236,7 @@ async def run(dry_run: bool = False):
             # ── Step 7: Save ─────────────────────────────────────────────
             # Only persist real publications. Dry-run must NOT mutate state
             # (otherwise a rehearsal run destroys the candidate queue).
+            logger.info("[Step 7/7] Saving publication state...")
             if not dry_run:
                 storage.mark_published(
                     url=article.url,
