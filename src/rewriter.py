@@ -137,6 +137,11 @@ async def call_llm(system_prompt: str, user_prompt: str, image_path: str | None 
     """Call primary LLM based on LLM_PROVIDER setting, falling back to secondary."""
     primary = LLM_PROVIDER.lower() if LLM_PROVIDER else "gemini"
 
+    # Helper to strip image instructions for text-only LLMs like Groq
+    def _text_only_prompt(prompt: str) -> str:
+        prefix = "ВНИМАНИЕ: Ознакомься с изображением выше. Напиши пост, который 100% визуально соотносится с этой картинкой и продуктом!\n\n"
+        return prompt.replace(prefix, "")
+
     if primary == "gemini":
         if GEMINI_API_KEY:
             try:
@@ -144,15 +149,15 @@ async def call_llm(system_prompt: str, user_prompt: str, image_path: str | None 
             except Exception as e:
                 logger.warning(f"Gemini failed: {e}")
                 if GROQ_API_KEY:
-                    logger.info("Falling back to Groq...")
-                    return await call_groq(system_prompt, user_prompt)
+                    logger.info("Falling back to Groq (text-only)...")
+                    return await call_groq(system_prompt, _text_only_prompt(user_prompt))
                 raise
         elif GROQ_API_KEY:
-            return await call_groq(system_prompt, user_prompt)
+            return await call_groq(system_prompt, _text_only_prompt(user_prompt))
     else:
         if GROQ_API_KEY:
             try:
-                return await call_groq(system_prompt, user_prompt)
+                return await call_groq(system_prompt, _text_only_prompt(user_prompt))
             except Exception as e:
                 logger.warning(f"Groq failed: {e}")
                 if GEMINI_API_KEY:

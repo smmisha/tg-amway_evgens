@@ -45,13 +45,14 @@ class Article:
 def detect_product_line(text: str) -> str:
     """Detect Amway product line from text content."""
     text_lower = text.lower()
-    if any(kw in text_lower for kw in ["xs", "энергетик", "energy", "xs power"]):
+    # Check for XS product line (use word boundary for 'xs' to avoid matching 'express', 'pixels', etc.)
+    if re.search(r"\bxs\b", text_lower) or any(kw in text_lower for kw in ["энергетик", "xs power", "xs™"]):
         return "XS"
     if any(kw in text_lower for kw in ["nutrilite", "нутрилайт", "витамин", "omega", "омега", "протеин"]):
         return "Nutrilite"
     if any(kw in text_lower for kw in ["artistry", "артистри", "косметик", "крем", "сыворотк", "уход за кож"]):
         return "Artistry"
-    if any(kw in text_lower for kw in ["amway home", "loc", "моющ", "чистящ", "стирк", "средство для"]):
+    if any(kw in text_lower for kw in ["amway home", " чистящ", " моющ", "стирк", "средство для"]) or re.search(r"\bloc\b", text_lower):
         return "Home Care"
     return "default"
 

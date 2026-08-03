@@ -37,7 +37,7 @@ from config.settings import (
     TELEGRAM_CHAT_ID,
 )
 from src.book_enricher import get_book_enrichment
-from src.media import download_first_image
+from src.media import download_first_image, cleanup_temp_media
 from src.media_validator import validate_image_with_gemini_vision
 from src.publisher import publish_post
 from src.rewriter import rewrite_article
@@ -123,129 +123,133 @@ async def run(dry_run: bool = False):
         logger.info(f"Product line: {article.product_line}")
         logger.info(f"URL: {article.url}")
 
-        # ── Step 3: Book Enrichment (30% chance) ─────────────────────
-        book_context = None
-        if random.random() < BOOK_ENRICHMENT_PROBABILITY:
-            logger.info("[Step 3/6] Adding book enrichment...")
-            book_context = get_book_enrichment()
-        else:
-            logger.info("[Step 3/6] Skipping book enrichment (random)")
-
-        # ── Step 4: Media Selection ──────────────────────────────────
-        logger.info("[Step 4/6] Selecting topic-matched product image...")
+        image_path = None
         try:
-            image_path = await download_first_image(
-                article.images,
-                article.product_line,
-                title=article.title,
-            )
-        except Exception as e:
-            logger.error(f"Image download failed: {e}. Skipping article.")
-            if not dry_run:
-                attempts.mark_attempted(article.url, reason=f"image_download: {e}")
-            failures.append(f"{article.title} — image_download: {e}")
-            continue
-        if image_path:
-            logger.info(f"Image ready: {image_path}")
+            # ── Step 3: Book Enrichment (30% chance) ─────────────────────
+            book_context = None
+            if random.random() < BOOK_ENRICHMENT_PROBABILITY:
+                logger.info("[Step 3/6] Adding book enrichment...")
+                book_context = get_book_enrichment()
+            else:
+                logger.info("[Step 3/6] Skipping book enrichment (random)")
 
-        # ── Step 5: Native Multimodal Rewrite via Gemini 3.6 Flash ────
-        logger.info("[Step 5/6] Generating post via Gemini 3.6 Flash (Multimodal)...")
-        try:
-            post_text = await rewrite_article(
-                article=article,
-                book_context=book_context,
-                image_path=image_path,
-            )
-        except RuntimeError as e:
-            logger.error(f"Rewrite failed: {e}. Skipping article.")
-            if not dry_run:
-                attempts.mark_attempted(article.url, reason=f"rewrite: {e}")
-            failures.append(f"{article.title} — rewrite: {e}")
-            continue
-
-        logger.info(f"Generated post ({len(post_text)} chars):")
-        logger.info(f"\n{post_text}\n")
-
-        # ── Step 5.5: Gemini "eyes" — check image + text together ──────
-        if image_path:
-            logger.info("[Step 5.5/6] Gemini visually checking image + text...")
+            # ── Step 4: Media Selection ──────────────────────────────────
+            logger.info("[Step 4/6] Selecting topic-matched product image...")
             try:
-                vision_ok = await validate_image_with_gemini_vision(
-                    image_path=image_path,
-                    topic_title=article.title,
-                    product_line=article.product_line,
-                    post_text=post_text,
+                image_path = await download_first_image(
+                    article.images,
+                    article.product_line,
+                    title=article.title,
                 )
             except Exception as e:
-                logger.warning(f"Vision validation error: {e}. Proceeding without it.")
-                vision_ok = True
-
-            if not vision_ok:
-                logger.warning(
-                    "Gemini rejected the post (image/text mismatch). "
-                    "Marking candidate failed; trying the next one."
-                )
+                logger.error(f"Image download failed: {e}. Skipping article.")
                 if not dry_run:
-                    attempts.mark_attempted(
-                        article.url, reason="gemini_vision_mismatch"
+                    attempts.mark_attempted(article.url, reason=f"image_download: {e}")
+                failures.append(f"{article.title} — image_download: {e}")
+                continue
+            if image_path:
+                logger.info(f"Image ready: {image_path}")
+
+            # ── Step 5: Native Multimodal Rewrite via Gemini 3.6 Flash ────
+            logger.info("[Step 5/6] Generating post via Gemini 3.6 Flash (Multimodal)...")
+            try:
+                post_text = await rewrite_article(
+                    article=article,
+                    book_context=book_context,
+                    image_path=image_path,
+                )
+            except RuntimeError as e:
+                logger.error(f"Rewrite failed: {e}. Skipping article.")
+                if not dry_run:
+                    attempts.mark_attempted(article.url, reason=f"rewrite: {e}")
+                failures.append(f"{article.title} — rewrite: {e}")
+                continue
+
+            logger.info(f"Generated post ({len(post_text)} chars):")
+            logger.info(f"\n{post_text}\n")
+
+            # ── Step 5.5: Gemini "eyes" — check image + text together ──────
+            if image_path:
+                logger.info("[Step 5.5/6] Gemini visually checking image + text...")
+                try:
+                    vision_ok = await validate_image_with_gemini_vision(
+                        image_path=image_path,
+                        topic_title=article.title,
+                        product_line=article.product_line,
+                        post_text=post_text,
                     )
-                failures.append(f"{article.title} — gemini_vision_mismatch")
-                continue
-            logger.info("Gemini approved the post (image + text match).")
+                except Exception as e:
+                    logger.warning(f"Vision validation error: {e}. Proceeding without it.")
+                    vision_ok = True
 
-        # ── Step 6: Publish ──────────────────────────────────────────
-        if dry_run:
-            logger.info("[Step 6/6] DRY RUN — skipping Telegram publish")
-            message_id = "dry-run"
-        else:
-            needs_preview = (
-                TELEGRAM_ADMIN_CHAT_ID and TELEGRAM_GROUP_CHAT_ID != TELEGRAM_ADMIN_CHAT_ID
-            )
-            if needs_preview:
-                logger.info("[Step 6/6] Sending preview to executor (admin chat)...")
-                await publish_post(
-                    text=post_text,
-                    image_path=image_path,
-                    use_html=False,  # Plain text — emojis don't need HTML
-                    chat_id=TELEGRAM_ADMIN_CHAT_ID,
-                )
-            logger.info("[Step 6/6] Publishing to Telegram group...")
-            try:
-                message_id = await publish_post(
-                    text=post_text,
-                    image_path=image_path,
-                    use_html=False,  # Plain text — emojis don't need HTML
-                )
-            except Exception as e:
-                logger.error(f"Publish failed: {e}. Skipping article.")
-                if not dry_run:
-                    attempts.mark_attempted(article.url, reason=f"publish: {e}")
-                failures.append(f"{article.title} — publish: {e}")
-                continue
-            if not message_id:
-                logger.error("Failed to publish. Skipping.")
-                if not dry_run:
-                    attempts.mark_attempted(article.url, reason="publish_empty")
-                failures.append(f"{article.title} — publish returned no message_id")
-                continue
+                if not vision_ok:
+                    logger.warning(
+                        "Gemini rejected the post (image/text mismatch). "
+                        "Marking candidate failed; trying the next one."
+                    )
+                    if not dry_run:
+                        attempts.mark_attempted(
+                            article.url, reason="gemini_vision_mismatch"
+                        )
+                    failures.append(f"{article.title} — gemini_vision_mismatch")
+                    continue
+                logger.info("Gemini approved the post (image + text match).")
 
-        # ── Step 7: Save ─────────────────────────────────────────────
-        # Only persist real publications. Dry-run must NOT mutate state
-        # (otherwise a rehearsal run destroys the candidate queue).
-        if not dry_run:
-            storage.mark_published(
-                url=article.url,
-                title=article.title,
-                telegram_message_id=message_id or "",
+            # ── Step 6: Publish ──────────────────────────────────────────
+            if dry_run:
+                logger.info("[Step 6/6] DRY RUN — skipping Telegram publish")
+                message_id = "dry-run"
+            else:
+                needs_preview = (
+                    TELEGRAM_ADMIN_CHAT_ID and TELEGRAM_GROUP_CHAT_ID != TELEGRAM_ADMIN_CHAT_ID
+                )
+                if needs_preview:
+                    logger.info("[Step 6/6] Sending preview to executor (admin chat)...")
+                    await publish_post(
+                        text=post_text,
+                        image_path=image_path,
+                        use_html=False,  # Plain text — emojis don't need HTML
+                        chat_id=TELEGRAM_ADMIN_CHAT_ID,
+                    )
+                logger.info("[Step 6/6] Publishing to Telegram group...")
+                try:
+                    message_id = await publish_post(
+                        text=post_text,
+                        image_path=image_path,
+                        use_html=False,  # Plain text — emojis don't need HTML
+                    )
+                except Exception as e:
+                    logger.error(f"Publish failed: {e}. Skipping article.")
+                    if not dry_run:
+                        attempts.mark_attempted(article.url, reason=f"publish: {e}")
+                    failures.append(f"{article.title} — publish: {e}")
+                    continue
+                if not message_id:
+                    logger.error("Failed to publish. Skipping.")
+                    if not dry_run:
+                        attempts.mark_attempted(article.url, reason="publish_empty")
+                    failures.append(f"{article.title} — publish returned no message_id")
+                    continue
+
+            # ── Step 7: Save ─────────────────────────────────────────────
+            # Only persist real publications. Dry-run must NOT mutate state
+            # (otherwise a rehearsal run destroys the candidate queue).
+            if not dry_run:
+                storage.mark_published(
+                    url=article.url,
+                    title=article.title,
+                    telegram_message_id=message_id or "",
+                )
+            published_count += 1
+            logger.info(
+                f"Marked as published (dry_run={dry_run}). Message ID: {message_id}"
             )
-        published_count += 1
-        logger.info(
-            f"Marked as published (dry_run={dry_run}). Message ID: {message_id}"
-        )
-        logger.info(
-            f"Day's goal reached ({MAX_ARTICLES_PER_RUN} post). Stopping loop."
-        )
-        break
+            logger.info(
+                f"Day's goal reached ({MAX_ARTICLES_PER_RUN} post). Stopping loop."
+            )
+            break
+        finally:
+            cleanup_temp_media(image_path)
 
     logger.info(f"\n{'=' * 50}")
     logger.info(f"Pipeline complete. Published {published_count}/{len(selected)} posts.")

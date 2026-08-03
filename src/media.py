@@ -127,3 +127,23 @@ async def download_first_image(
             return filepath
 
     return None
+
+
+def cleanup_temp_media(filepath: str | None):
+    """Safely remove a temporary downloaded image file and its parent temp directory."""
+    if not filepath or not os.path.exists(filepath):
+        return
+
+    try:
+        parent_dir = os.path.dirname(filepath)
+        os.remove(filepath)
+        # If parent_dir is a temporary amway_media folder, remove it if empty
+        if os.path.basename(parent_dir).startswith("amway_media_"):
+            try:
+                os.rmdir(parent_dir)
+            except OSError:
+                pass  # Directory not empty or already removed
+        logger.info(f"Cleaned up temporary media file: {filepath}")
+    except Exception as e:
+        logger.warning(f"Failed to clean up temp media file {filepath}: {e}")
+

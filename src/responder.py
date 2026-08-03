@@ -63,6 +63,12 @@ async def process_updates():
         resp = await client.get(f"{base_url}/getUpdates", params=params)
         data = resp.json()
 
+        if resp.status_code == 409 or data.get("error_code") == 409:
+            logger.warning(
+                "Telegram getUpdates conflict (409): another bot instance is active. Skipping."
+            )
+            return
+
         if not data.get("ok"):
             logger.error(f"getUpdates failed: {data}")
             return
