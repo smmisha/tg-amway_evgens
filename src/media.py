@@ -15,12 +15,34 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 async def download_image(url: str, output_dir: str | None = None) -> str | None:
-    """Download an image from URL and return the local file path."""
+    """Download an image from URL and return the local file path.
+
+    Also supports local repository-relative paths (e.g. "data/media/post_7_xxx.jpg"):
+    the file is validated and returned as-is without downloading.
+    """
     if not url:
         return None
 
+    parsed = urlparse(url)
+
+    # Local file path (repo-relative or absolute) — no download needed
+    if parsed.scheme not in ("http", "https"):
+        local_path = os.path.normpath(url)
+        if os.path.exists(local_path) and os.path.isfile(local_path):
+            ext = os.path.splitext(local_path)[1].lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                logger.warning(f"Unsupported local image extension: {local_path}")
+                return None
+            size = os.path.getsize(local_path)
+            if size > MAX_IMAGE_SIZE:
+                logger.warning(f"Local image too large ({size} bytes): {local_path}")
+                return None
+            logger.info(f"Using local image: {local_path} ({size} bytes)")
+            return local_path
+        logger.warning(f"Local image file not found: {local_path}")
+        return None
+
     try:
-        parsed = urlparse(url)
         ext = os.path.splitext(parsed.path)[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
             ext = ".jpg"
@@ -132,20 +154,25 @@ async def download_first_image(
 
 
 def cleanup_temp_media(filepath: str | None):
-    """Safely remove a temporary downloaded image file and its parent temp directory."""
+    """Safely remove a temporary downloaded image file and its parent temp directory.
+
+    Only files inside amway_media_ temp directories are removed, so committed
+    repository images (data/media/*) are never deleted.
+    """
     if not filepath or not os.path.exists(filepath):
         return
 
     try:
         parent_dir = os.path.dirname(filepath)
-        os.remove(filepath)
-        # If parent_dir is a temporary amway_media folder, remove it if empty
         if os.path.basename(parent_dir).startswith("amway_media_"):
+            os.remove(filepath)
             try:
                 os.rmdir(parent_dir)
             except OSError:
                 pass  # Directory not empty or already removed
-        logger.info(f"Cleaned up temporary media file: {filepath}")
+            logger.info(f"Cleaned up temporary media file: {filepath}")
+        else:
+            logger.info(f"Skipping cleanup of persistent media file: {filepath}")
     except Exception as e:
         logger.warning(f"Failed to clean up temp media file {filepath}: {e}")
 
