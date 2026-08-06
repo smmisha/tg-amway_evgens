@@ -12,11 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Restore bot state (latest artifact)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/state_helpers.sh
+          restore_state
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -61,11 +69,10 @@ jobs:
              exit 1
           fi
 
-      - name: Commit and push prepared state
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main || true
-          git add data/prepared_posts.json data/published.json data/attempted.json
-          git commit -m "chmod/data: update prepared post queue and tracking state" || echo "No changes to commit"
-          git push origin main
+      - name: Upload updated state
+        uses: actions/upload-artifact@v4
+        with:
+          name: amway-state
+          path: data/*.json
+          if-no-files-found: ignore
+          retention-days: 1

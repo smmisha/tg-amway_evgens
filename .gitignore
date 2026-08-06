@@ -1,5 +1,8 @@
 .env
 __pycache__/
+data/*.json
+!data/books_bundle.json
+!data/products_catalog.json
 *.pyc
 .venv/
 venv/

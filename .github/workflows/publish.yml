@@ -11,11 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Restore bot state (latest artifact)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/state_helpers.sh
+          restore_state
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -55,18 +63,11 @@ jobs:
             xvfb-run -a python -m src.main
           fi
 
-      - name: Commit updated published.json
+      - name: Upload updated state
         if: always()
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          git config user.name "Amway Bot"
-          git config user.email "bot@github.com"
-          git add data/published.json data/attempted.json data/prepared_posts.json
-          git diff --staged --quiet || git commit -m "Update published articles [skip ci]"
-          git pull --rebase origin main || true
-          if [ -n "$GH_PAT" ]; then
-            git push "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
-          else
-            git push
-          fi
+        uses: actions/upload-artifact@v4
+        with:
+          name: amway-state
+          path: data/*.json
+          if-no-files-found: ignore
+          retention-days: 1
