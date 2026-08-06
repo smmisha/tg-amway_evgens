@@ -7,3 +7,7 @@ node_modules/
 *.log
 .pytest_cache/
 .chrome-profile/
+.env.*
+*.bak
+data/*.bak
+.vscode/
