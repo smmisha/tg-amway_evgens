@@ -1,0 +1,29 @@
+name: Bootstrap state artifact (one-off)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore state files from git history
+        run: |
+          mkdir -p data
+          git show 0da9a7e:data/published.json > data/published.json
+          git show 1320a77:data/prepared_posts.json > data/prepared_posts.json
+          git show 97b4aae:data/attempted.json > data/attempted.json
+
+      - name: Upload state artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amway-state
+          path: data/*.json
+          overwrite: true
+          if-no-files-found: error
