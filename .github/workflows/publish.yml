@@ -70,4 +70,4 @@ jobs:
           name: amway-state
           path: data/*.json
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: 7

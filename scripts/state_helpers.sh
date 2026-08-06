@@ -30,7 +30,18 @@ restore_state() {
     -o "${RUNNER_TEMP}/amway-state.zip"
 
   mkdir -p "${GITHUB_WORKSPACE}/data"
-  (cd "${GITHUB_WORKSPACE}" && unzip -o "${RUNNER_TEMP}/amway-state.zip")
+
+  local extract_dir="${RUNNER_TEMP}/amway-state-extract"
+  rm -rf "${extract_dir}"
+  mkdir -p "${extract_dir}"
+  (cd "${extract_dir}" && unzip -o "${RUNNER_TEMP}/amway-state.zip")
+
+  # upload-artifact may flatten data/*.json to the zip root, or keep a data/ prefix
+  if compgen -G "${extract_dir}/data/*.json" > /dev/null 2>&1; then
+    cp "${extract_dir}"/data/*.json "${GITHUB_WORKSPACE}/data/"
+  else
+    cp "${extract_dir}"/*.json "${GITHUB_WORKSPACE}/data/"
+  fi
 
   local count
   count="$(find "${GITHUB_WORKSPACE}/data" -name '*.json' 2>/dev/null | wc -l)"
