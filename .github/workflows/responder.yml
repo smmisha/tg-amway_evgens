@@ -9,7 +9,7 @@ on:
 jobs:
   respond:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -29,7 +29,28 @@ jobs:
       - name: Check and reply to messages
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python -m src.responder
+        run: |
+          set -euo pipefail
+          attempts=0
+          max_attempts=3
+          delay=10
+          until [ $attempts -ge $max_attempts ]
+          do
+            attempts=$((attempts+1))
+            echo "Attempt $attempts of $max_attempts..."
+            python -m src.responder && break || {
+              rc=$?
+              echo "Attempt $attempts failed with exit code $rc."
+              if [ $attempts -lt $max_attempts ]; then
+                echo "Sleeping $delay seconds before retry..."
+                sleep $delay
+                delay=$((delay*2))
+              else
+                echo "All attempts failed."
+                exit $rc
+              fi
+            }
+          done
 
       - name: Commit updated last_update_id
         if: always()
