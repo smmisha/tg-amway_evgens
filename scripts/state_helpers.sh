@@ -23,7 +23,7 @@ restore_state() {
   fi
 
   echo "[state] Restoring state from artifact #${artifact_id}..."
-  curl -sS \
+  curl -sSL \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/vnd.github+json" \
     "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
