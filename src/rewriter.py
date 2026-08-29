@@ -36,43 +36,47 @@ logger = logging.getLogger(__name__)
 
 
 async def call_groq(system_prompt: str, user_prompt: str) -> str:
-    """Call Groq API (Llama 3.3 70B)."""
+    """Call Groq API with model fallback chain."""
+    from config.settings import GROQ_FALLBACK_MODELS
+
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json",
     }
-    body = {
-        "model": GROQ_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": LLM_TEMPERATURE,
-        "max_tokens": LLM_MAX_TOKENS,
-    }
+    models = [GROQ_MODEL] + [m for m in GROQ_FALLBACK_MODELS if m != GROQ_MODEL]
 
     async with httpx.AsyncClient(timeout=60) as client:
-        for attempt in range(1, 3):
-            try:
-                resp = await client.post(url, headers=headers, json=body)
-                data = resp.json()
-                if resp.status_code == 429:
-                    logger.warning(f"Groq rate limited (attempt {attempt}). Waiting...")
-                    await asyncio.sleep(5 * attempt)
-                    continue
-                resp.raise_for_status()
-                choice = data["choices"][0]
-                content = choice["message"]["content"].strip()
-                if choice.get("finish_reason") == "length":
-                    logger.warning(f"Groq response truncated (finish_reason=length, attempt {attempt}). Retrying...")
-                    raise RuntimeError("Groq response truncated")
-                return content
-            except Exception as e:
-                logger.warning(f"Groq attempt {attempt} failed: {e}")
-                if attempt < 2:
-                    await asyncio.sleep(3)
-    raise RuntimeError("Groq API failed after retries")
+        for model in models:
+            body = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": LLM_TEMPERATURE,
+                "max_tokens": LLM_MAX_TOKENS,
+            }
+            for attempt in range(1, 3):
+                try:
+                    resp = await client.post(url, headers=headers, json=body)
+                    if resp.status_code == 429:
+                        logger.warning(f"Groq {model} rate limited (attempt {attempt}). Waiting...")
+                        await asyncio.sleep(5 * attempt)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    choice = data["choices"][0]
+                    content = choice["message"]["content"].strip()
+                    if choice.get("finish_reason") == "length":
+                        logger.warning(f"Groq response truncated. Retrying...")
+                        raise RuntimeError("Groq response truncated")
+                    return content
+                except Exception as e:
+                    logger.warning(f"Groq {model} attempt {attempt} failed: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+    raise RuntimeError("All Groq models failed after retries")
 
 
 async def call_gemini(system_prompt: str, user_prompt: str, image_path: str | None = None) -> str:

@@ -28,8 +28,9 @@ SCRAPE_WAIT_TIMEOUT_MS = 25000  # how long to wait for DataDome challenge to res
 # LLM settings
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_FALLBACK = os.getenv("LLM_FALLBACK", "groq")
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GEMINI_MODELS = ["gemini-3.6-flash"]
+GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_FALLBACK_MODELS = ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "groq/compound"]
+GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 LLM_TEMPERATURE = 0.7
 LLM_MAX_TOKENS = 2048
 LLM_MAX_RETRIES = 3
