@@ -318,12 +318,19 @@ async def run_prepare():
                     attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
                     continue
 
-            # Save prepared draft
+            # Save prepared draft — store the ORIGINAL HTTP URL from the
+            # article page, not the local temp path. The local file won't
+            # exist in the publish workflow's GitHub Actions environment.
+            original_image_url = ""
+            for img_url in article.images:
+                if img_url.startswith("http"):
+                    original_image_url = img_url
+                    break
             post_draft = {
                 "url": article.url,
                 "title": article.title,
                 "text": post_text,
-                "image_url": article.images[0] if article.images else "",
+                "image_url": original_image_url,
                 "product_line": article.product_line,
             }
             prepared.add_prepared(post_draft)
@@ -354,8 +361,12 @@ async def run_publish_prepared(dry_run: bool = False):
 
     post_draft = prepared.pop_prepared()
     if not post_draft:
-        logger.warning("Prepared queue is empty. Falling back to live pipeline execution...")
-        await run(dry_run=dry_run)
+        logger.warning(
+            "Prepared queue is empty. No posts to publish. "
+            "The prepare workflow should fill the queue before publish runs."
+        )
+        # Exit gracefully — do NOT fall back to live pipeline, as it adds
+        # ~30 min of scraping and can push the post into late night hours.
         return
 
     logger.info(f"Publishing prepared post: {post_draft.get('title')}")
