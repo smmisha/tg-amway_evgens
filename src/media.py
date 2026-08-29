@@ -90,6 +90,7 @@ FALLBACK_PRODUCT_IMAGES: dict[str, list[str]] = {
     "Nutrilite_VitaminC": ["data/media/post_9_e3fbab59.jpg"],
     "Nutrilite_CalciumMagnesium": ["data/media/post_10_050b9f4d.jpg"],
     "Nutrilite_VitaminD": ["data/media/post_20_b5850f5d.jpg"],
+    "Nutrilite_Metabolism": ["data/media/post_metabolism_plus.jpg"],
     "XS_WildBerry": ["data/media/post_11_f4ffe234.jpg"],
     "XS_WheyProtein": ["data/media/post_12_26fb454c.jpg"],
     "XS_Magnesium": ["data/media/post_19_0922c3d5.jpg"],
@@ -116,6 +117,8 @@ def detect_subtopic_key(title: str, product_line: str) -> str | None:
         return "Nutrilite_CalciumMagnesium"
     if any(kw in t for kw in ["вітамін d", "витамин d", "vitamin d"]):
         return "Nutrilite_VitaminD"
+    if any(kw in t for kw in ["метаболіз", "метаболиз", "metabolism"]):
+        return "Nutrilite_Metabolism"
 
     # XS exact matches
     if any(kw in t for kw in ["wild berry", "ягід", "ягод", "power drink"]):
