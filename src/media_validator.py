@@ -67,12 +67,7 @@ async def validate_image_with_gemini_vision(
         return False
 
     mime_type, base64_data = encoded
-    model_name = GEMINI_MODELS[0] if GEMINI_MODELS else "gemini-3.6-flash"
-
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}"
-        f":generateContent?key={GEMINI_API_KEY}"
-    )
+    models = GEMINI_MODELS if GEMINI_MODELS else ["gemini-3.7-flash", "gemini-3.6-flash"]
 
     if post_text:
         text_check = f"""
@@ -93,13 +88,12 @@ async def validate_image_with_gemini_vision(
 
 Оцени визуальное соответствие:
 1. Подходит ли это изображение по смыслу к теме "{topic_title}"?
-   (Например: если тема Омега-3 / рыбий жир — подходят капсулы с золотистым жиром, баночки с Омега-3, морские визуализации, рыбы/природа. НЕ подходят: случайная косметика, бытовая химия, случайные не связанные объекты).
+   (Например: если тема Омега-3 / рыбий жир — подходят капсулы с золотистым жиром, баночки с Омега-3, морские визуализации, рыбы/природа. НЕ подходят: другой препарат, например витамины Double X или косметика, случайные несвязанные продукты).
 2. Является ли изображение качественным и привлекательным для поста?
 {text_check}
 Ответь СТРОГО в формате JSON:
 {{"is_matching": true/false, "text_ok": true/false, "reason": "краткое объяснение"}}
 """.strip()
-
 
     body = {
         "contents": [
@@ -117,52 +111,57 @@ async def validate_image_with_gemini_vision(
         ],
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 150,
+            "maxOutputTokens": 1000,
         },
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(url, json=body)
-            data = resp.json()
+    async with httpx.AsyncClient(timeout=30) as client:
+        for model_name in models:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}"
+                f":generateContent?key={GEMINI_API_KEY}"
+            )
+            try:
+                resp = await client.post(url, json=body)
+                if resp.status_code in (429, 503):
+                    logger.warning(f"Gemini Vision {model_name} status {resp.status_code}, trying next model...")
+                    continue
+                data = resp.json()
 
-            if "candidates" in data and data["candidates"]:
-                parts = data["candidates"][0].get("content", {}).get("parts", [])
-                if parts:
-                    resp_text = parts[0].get("text", "").strip()
-                    logger.info(f"Gemini Vision validation output: {resp_text}")
+                if "candidates" in data and data["candidates"]:
+                    parts = data["candidates"][0].get("content", {}).get("parts", [])
+                    if parts:
+                        resp_text = parts[0].get("text", "").strip()
+                        logger.info(f"Gemini Vision ({model_name}) validation output: {resp_text}")
 
-                    parsed = _parse_validation_json(resp_text)
-                    if parsed is None:
-                        # Model didn't return a parsable JSON. Don't block a
-                        # valid post just because the model drifted from the
-                        # required format (same fail-open policy as API errors).
-                        logger.warning(
-                            f"Gemini Vision returned non-JSON for {os.path.basename(image_path)}; "
-                            f"approving by default (raw: {resp_text[:120]})"
-                        )
-                        return True
+                        parsed = _parse_validation_json(resp_text)
+                        if parsed is None:
+                            logger.warning(
+                                f"Gemini Vision returned non-JSON for {os.path.basename(image_path)}; "
+                                f"approving by default (raw: {resp_text[:120]})"
+                            )
+                            return True
 
-                    is_approved = bool(parsed.get("is_matching", False))
-                    if post_text:
-                        is_approved = is_approved and bool(
-                            parsed.get("text_ok", False)
-                        )
-                    if is_approved:
-                        logger.info(f"Image {os.path.basename(image_path)} APPROVED by Gemini Vision")
-                        return True
-                    else:
-                        reason = parsed.get("reason", "")
-                        logger.warning(
-                            f"Image {os.path.basename(image_path)} REJECTED by Gemini Vision: {reason or resp_text}"
-                        )
-                        return False
+                        is_approved = bool(parsed.get("is_matching", False))
+                        if post_text:
+                            is_approved = is_approved and bool(
+                                parsed.get("text_ok", False)
+                            )
+                        if is_approved:
+                            logger.info(f"Image {os.path.basename(image_path)} APPROVED by Gemini Vision")
+                            return True
+                        else:
+                            reason = parsed.get("reason", "")
+                            logger.warning(
+                                f"Image {os.path.basename(image_path)} REJECTED by Gemini Vision: {reason or resp_text}"
+                            )
+                            return False
 
-    except Exception as e:
-        logger.warning(f"Gemini Vision validation error: {e}")
-        # Default to True on API error to not block execution
-        return True
+            except Exception as e:
+                logger.warning(f"Gemini Vision {model_name} error: {e}")
+                continue
 
+    logger.warning("All Gemini Vision models failed or returned error; falling back to True")
     return True
 
 

@@ -142,6 +142,7 @@ async def run(dry_run: bool = False):
                     article.images,
                     article.product_line,
                     title=article.title,
+                    url=article.url,
                 )
             except Exception as e:
                 logger.error(f"Image download failed: {e}. Skipping article.")
@@ -303,7 +304,12 @@ async def run_prepare():
         image_path = None
         try:
             book_context = get_book_enrichment() if random.random() < BOOK_ENRICHMENT_PROBABILITY else None
-            image_path = await download_first_image(article.images, article.product_line, title=article.title)
+            image_path = await download_first_image(
+                article.images,
+                article.product_line,
+                title=article.title,
+                url=article.url,
+            )
             
             post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
             
@@ -359,7 +365,11 @@ async def run_publish_prepared(dry_run: bool = False):
     prepared = PreparedStorage(PREPARED_POSTS_JSON)
     storage = Storage(PUBLISHED_JSON)
 
-    post_draft = prepared.pop_prepared()
+    if dry_run:
+        post_draft = prepared._data[0] if prepared._data else None
+    else:
+        post_draft = prepared.pop_prepared()
+
     if not post_draft:
         logger.warning(
             "Prepared queue is empty. No posts to publish. "
@@ -378,7 +388,7 @@ async def run_publish_prepared(dry_run: bool = False):
 
     image_path = None
     if image_url:
-        image_path = await download_first_image([image_url], product_line=product_line, title=title)
+        image_path = await download_first_image([image_url], product_line=product_line, title=title, url=url)
 
     try:
         if dry_run:

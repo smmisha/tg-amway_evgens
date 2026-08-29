@@ -83,55 +83,70 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
 
 
 # Fallback product images: local repository images of real Amway products.
-# Guaranteed 100% reliable, zero network dependency, never 503.
-FALLBACK_PRODUCT_IMAGES = {
-    "Nutrilite_Omega3": [
-        "data/media/post_7_02dfeb6e.jpg",
-    ],
-    "Nutrilite_Vitamins": [
-        "data/media/post_8_dd22cf0c.jpg",
-        "data/media/post_9_e3fbab59.jpg",
-        "data/media/post_10_050b9f4d.jpg",
-        "data/media/post_20_b5850f5d.jpg",
-    ],
-    "Nutrilite_Default": [
-        "data/media/post_8_dd22cf0c.jpg",
-        "data/media/post_20_b5850f5d.jpg",
-    ],
-    "XS": [
-        "data/media/post_11_f4ffe234.jpg",
-        "data/media/post_12_26fb454c.jpg",
-        "data/media/post_19_0922c3d5.jpg",
-    ],
-    "Artistry": [
-        "data/media/post_13_e5c3ccda.jpg",
-        "data/media/post_14_fa2399c4.jpg",
-        "data/media/post_15_5fc5454a.jpg",
-    ],
-    "Home Care": [
-        "data/media/post_16_de56257c.jpg",
-        "data/media/post_17_53d18f48.jpg",
-        "data/media/post_18_e2195dd6.jpg",
-    ],
-    "default": [
-        "data/media/post_8_dd22cf0c.jpg",
-    ],
+# Every entry is an EXACT 1:1 match for that specific product only.
+FALLBACK_PRODUCT_IMAGES: dict[str, list[str]] = {
+    "Nutrilite_Omega3": ["data/media/post_7_02dfeb6e.jpg"],
+    "Nutrilite_DoubleX": ["data/media/post_8_dd22cf0c.jpg"],
+    "Nutrilite_VitaminC": ["data/media/post_9_e3fbab59.jpg"],
+    "Nutrilite_CalciumMagnesium": ["data/media/post_10_050b9f4d.jpg"],
+    "Nutrilite_VitaminD": ["data/media/post_20_b5850f5d.jpg"],
+    "XS_WildBerry": ["data/media/post_11_f4ffe234.jpg"],
+    "XS_WheyProtein": ["data/media/post_12_26fb454c.jpg"],
+    "XS_Magnesium": ["data/media/post_19_0922c3d5.jpg"],
+    "Artistry_DayLotion": ["data/media/post_13_e5c3ccda.jpg"],
+    "Artistry_CCCream": ["data/media/post_14_fa2399c4.jpg"],
+    "Artistry_Mascara": ["data/media/post_15_5fc5454a.jpg"],
+    "HomeCare_Bleach": ["data/media/post_16_de56257c.jpg"],
+    "HomeCare_DishDrops": ["data/media/post_17_53d18f48.jpg"],
+    "HomeCare_ScrubBuds": ["data/media/post_18_e2195dd6.jpg"],
 }
 
-def detect_subtopic_key(title: str, product_line: str) -> str:
-    """Determine fine-grained subtopic for fallback image selection."""
-    text_lower = f"{title} {product_line}".lower()
-    if "nutrilite" in text_lower or "нутрилайт" in text_lower or "витамин" in text_lower:
-        if any(kw in text_lower for kw in ["омега", "omega", "жирн", "рыби", "fish"]):
-            return "Nutrilite_Omega3"
-        return "Nutrilite_Vitamins"
-    if product_line in FALLBACK_PRODUCT_IMAGES:
-        return product_line
-    return "default"
+def detect_subtopic_key(title: str, product_line: str) -> str | None:
+    """Determine fine-grained subtopic ONLY when there is an exact 1:1 product match."""
+    t = f"{title} {product_line}".lower()
+
+    # Nutrilite exact matches
+    if any(kw in t for kw in ["омега", "omega", "жирн", "рыби", "fish"]):
+        return "Nutrilite_Omega3"
+    if "double x" in t or "дабл" in t:
+        return "Nutrilite_DoubleX"
+    if any(kw in t for kw in ["вітамін c", "витамин c", "vitamin c", "вітамін с", "витамин с"]):
+        return "Nutrilite_VitaminC"
+    if any(kw in t for kw in ["кальцій", "кальций", "магній d", "магний d", "calcium"]):
+        return "Nutrilite_CalciumMagnesium"
+    if any(kw in t for kw in ["вітамін d", "витамин d", "vitamin d"]):
+        return "Nutrilite_VitaminD"
+
+    # XS exact matches
+    if any(kw in t for kw in ["wild berry", "ягід", "ягод", "power drink"]):
+        return "XS_WildBerry"
+    if any(kw in t for kw in ["whey", "протеїн", "протеин", "сироватк", "сыворотк"]):
+        return "XS_WheyProtein"
+    if any(kw in t for kw in ["магній", "магний", "пакетик", "пакет"]):
+        return "XS_Magnesium"
+
+    # Artistry exact matches
+    if any(kw in t for kw in ["spf 30", "денний лосьйон", "дневной лосьон", "skin nutrition"]):
+        return "Artistry_DayLotion"
+    if any(kw in t for kw in ["ss-крем", "сс-крем", "ideal radiance", "вирівнювання тону"]):
+        return "Artistry_CCCream"
+    if any(kw in t for kw in ["туш", "тушь", "вії", "ресниц", "bangkok"]):
+        return "Artistry_Mascara"
+
+    # Home Care exact matches
+    if any(kw in t for kw in ["відбілювач", "отбеливатель", "sa8"]):
+        return "HomeCare_Bleach"
+    if any(kw in t for kw in ["dish drops", "миття посуду", "мытья посуды"]):
+        return "HomeCare_DishDrops"
+    if any(kw in t for kw in ["scrub buds", "металеві губки", "металлические губки"]):
+        return "HomeCare_ScrubBuds"
+
+    # No exact match -> None (do NOT attach a mismatched image!)
+    return None
 
 
-def _load_catalog_images_for_product(product_line: str, title: str) -> list[str]:
-    """Load image URLs from products_catalog.json matching the product line or title."""
+def _load_catalog_images_for_product(url: str, title: str) -> list[str]:
+    """Load image URLs from products_catalog.json matching the specific product URL or full title."""
     import json as _json
 
     catalog_file = os.path.join(
@@ -142,15 +157,24 @@ def _load_catalog_images_for_product(product_line: str, title: str) -> list[str]
     try:
         with open(catalog_file, "r", encoding="utf-8") as f:
             catalog = _json.load(f)
-        # Find entries matching the product line or title keywords
         urls = []
-        title_lower = title.lower()
+        clean_url = (url or "").strip().rstrip("/")
+        title_lower = (title or "").lower().strip()
+
         for item in catalog:
-            item_line = item.get("product_line", "")
-            item_title = item.get("title", "").lower()
-            if item_line == product_line or any(kw in item_title for kw in title_lower.split()[:3] if len(kw) > 3):
+            item_url = item.get("url", "").strip().rstrip("/")
+            item_title = item.get("title", "").lower().strip()
+
+            # Exact URL match or strong title match
+            is_match = False
+            if clean_url and item_url and clean_url == item_url:
+                is_match = True
+            elif title_lower and item_title and (title_lower in item_title or item_title in title_lower):
+                is_match = True
+
+            if is_match:
                 for img_url in item.get("images", []):
-                    if img_url.startswith("http") and img_url not in urls:
+                    if img_url and img_url not in urls:
                         urls.append(img_url)
         return urls
     except Exception as e:
@@ -162,50 +186,54 @@ async def download_first_image(
     image_urls: list[str],
     product_line: str = "default",
     title: str = "",
+    url: str = "",
 ) -> str | None:
-    """Download the first available image from scraped URLs, or topic-matched fallback image.
+    """Download the first available image matching THIS SPECIFIC product.
 
     Priority order:
     1. Scraped image URLs from the article page (og:image, img tags)
-    2. Catalog images from products_catalog.json (real Amway product shots)
-    3. Hardcoded Amway product fallbacks from web.archive.org
-    4. None (no image — better than a random stock photo)
+    2. Catalog images for THIS specific product from products_catalog.json
+    3. Exact 1:1 local fallback image (only if title explicitly matches the product)
+    4. None (text-only post — infinitely better than a wrong product's picture!)
 
     Args:
         image_urls: List of candidate scraped URLs
         product_line: Amway product category
         title: Article or product title
+        url: Article URL
 
     Returns:
         Local file path to downloaded product image, or None.
     """
-    # 1. Try scraped image URLs (from the article page — highest priority)
-    for url in image_urls:
-        filepath = await download_image(url)
-        if filepath:
-            logger.info(f"Using scraped image from article: {url[:80]}...")
-            return filepath
+    # 1. Try scraped image URLs from the article page
+    for img_url in image_urls:
+        if img_url:
+            filepath = await download_image(img_url)
+            if filepath:
+                logger.info(f"Using scraped image from article: {img_url[:80]}...")
+                return filepath
 
-    # 2. Try catalog images from products_catalog.json
-    catalog_urls = _load_catalog_images_for_product(product_line, title)
-    for url in catalog_urls:
-        filepath = await download_image(url)
-        if filepath:
-            logger.info(f"Using catalog image: {url[:80]}...")
-            return filepath
+    # 2. Try catalog images for THIS specific product
+    catalog_urls = _load_catalog_images_for_product(url=url, title=title)
+    for img_url in catalog_urls:
+        if img_url:
+            filepath = await download_image(img_url)
+            if filepath:
+                logger.info(f"Using exact catalog image: {img_url[:80]}...")
+                return filepath
 
-    # 3. Hardcoded Amway product fallbacks (web.archive.org mirrors)
+    # 3. Exact 1:1 local product fallback (ONLY if subtopic matches 100%)
     subtopic_key = detect_subtopic_key(title, product_line)
-    fallbacks = FALLBACK_PRODUCT_IMAGES.get(subtopic_key, FALLBACK_PRODUCT_IMAGES["default"])
+    if subtopic_key and subtopic_key in FALLBACK_PRODUCT_IMAGES:
+        fallbacks = FALLBACK_PRODUCT_IMAGES[subtopic_key]
+        for img_url in fallbacks:
+            filepath = await download_image(img_url)
+            if filepath:
+                logger.info(f"Using exact 1:1 fallback image [{subtopic_key}]: {img_url}")
+                return filepath
 
-    for url in fallbacks:
-        filepath = await download_image(url)
-        if filepath:
-            logger.info(f"Using hardcoded fallback image: {url[:80]}...")
-            return filepath
-
-    # 4. No image at all — better than irrelevant stock photo
-    logger.warning(f"No image found for '{title}' [{product_line}]. Post will be text-only.")
+    # 4. No exact image -> Text-only post
+    logger.info(f"No exact image for '{title}' [{product_line}]. Publishing as text-only post.")
     return None
 
 

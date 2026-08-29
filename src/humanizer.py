@@ -68,15 +68,7 @@ def looks_like_model_artifact(text: str) -> bool:
         return True
 
     # "Вот ваш текст:" or "Перевод:" preamble
-    if re.search(r"^\s*(?:Вот|Перевод|Готовый текст|Ваш пост)\s*:", t, re.IGNORECASE):
-        return True
-
-    # Missing mandatory post elements
-    if "@evgen_blago" not in t:
-        logger.warning("Post missing @evgen_blago CTA — rejecting as artifact")
-        return True
-    if "#" not in t:
-        logger.warning("Post missing hashtags — rejecting as artifact")
+    if re.search(r"^\s*(?:Вот|Вот ваш текст|Перевод|Готовый текст|Ваш пост)\s*:", t, re.IGNORECASE):
         return True
 
     return False
