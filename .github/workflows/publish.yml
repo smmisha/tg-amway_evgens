@@ -2,9 +2,7 @@ name: Amway Bot — Publish Posts
 
 on:
   schedule:
-    # 10:00 UTC = 13:00 Kyiv (summer UTC+3) / 12:00 Kyiv (winter UTC+2)
-    - cron: '0 10 * * *'
-    # 15:00 UTC = 18:00 Kyiv (summer UTC+3) / 17:00 Kyiv (winter UTC+2)
+    # Daily at 18:00 Kyiv time (15:00 UTC in summer UTC+3 / 16:00 UTC in winter UTC+2)
     - cron: '0 15 * * *'
   workflow_dispatch: {}
 
