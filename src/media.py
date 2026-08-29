@@ -82,33 +82,39 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
         return None
 
 
-# Fallback product images from Amway's own catalog (web.archive.org mirrors).
-# These are REAL product shots, not random stock photos.
+# Fallback product images: local repository images of real Amway products.
+# Guaranteed 100% reliable, zero network dependency, never 503.
 FALLBACK_PRODUCT_IMAGES = {
     "Nutrilite_Omega3": [
-        "https://web.archive.org/web/20220305135006im_/https://www.amway.ua/common/medias/EIA.w600.h600.4298-20210623.jpg?context=bWFzdGVyfHJvb3R8MjkxNjJ8aW1hZ2UvanBlZ3xoOGEvaDNjLzk1MjUwNjQ3NjEzNzQuanBnfDNkN2NkMWMwNmY4YWM5NWFmNWFlODU4ZGNhYTM0ZjRlZDNlZTY4Y2IwN2IyMTRjNWFlYWQ3Mzc0OTM3ZWFkNWI&ccv=VUtSLU8=",
+        "data/media/post_7_02dfeb6e.jpg",
     ],
     "Nutrilite_Vitamins": [
-        "https://web.archive.org/web/20220305144934im_/https://www.amway.ua/common/medias/EIA.w600.h600.121576-2-20210623.jpg?context=bWFzdGVyfHJvb3R8MzU2MjN8aW1hZ2UvanBlZ3xoMWMvaDljLzk1MjUwNTEyMjgxOTAuanBnfGUwNGYzM2U4OWQ0M2Y1Nzg0ZDNlZmEzOTJhMmFhMDQ1OWJmNjgyN2VlMjY3M2JhNTg0MDQ2MDE4MjE2ZmJlOTU&ccv=VUtSLU8=",
-        "https://web.archive.org/web/20220525115103im_/https://www.amway.ua/common/medias/EIA.w600.h600.109741-20210623.jpg?context=bWFzdGVyfHJvb3R8MjkyNTJ8aW1hZ2UvanBlZ3xoODkvaGRiLzk1MjUwNjEyODc5NjYuanBnfDE0NDMyNDg3MmI1ODczOGIzMDE5NmJkMzQ1NzFhMDVkNmU5ODllYmQ4MDViZDViZjFjZDIzYzRjMWJiYTk5OWU&ccv=VUtSLU8=",
+        "data/media/post_8_dd22cf0c.jpg",
+        "data/media/post_9_e3fbab59.jpg",
+        "data/media/post_10_050b9f4d.jpg",
+        "data/media/post_20_b5850f5d.jpg",
     ],
     "Nutrilite_Default": [
-        "https://web.archive.org/web/20220322173449im_/https://www.amway.ua/common/medias/EIA.w600.h600.119797-20210623.jpg?context=bWFzdGVyfHJvb3R8Mjk0ODR8aW1hZ2UvanBlZ3xoZTcvaDIzLzk1MjUwNjU4NzU0ODYuanBnfGM0MDNmOTU2YTIyZWM5Zjg4YzBmZDAxZTg3NjRkYWY2NGMwMjNhNzVhZTUyZDY5Y2FhY2ExYWYwYzRkZTE5YzQ&ccv=VUtSLU8=",
+        "data/media/post_8_dd22cf0c.jpg",
+        "data/media/post_20_b5850f5d.jpg",
     ],
     "XS": [
-        "https://web.archive.org/web/20220902184943im_/https://media.amway.ua/sys-master/h8f/hda/9524920778782.jpg",
-        "https://web.archive.org/web/20220524124712im_/https://www.amway.ua/common/medias/EIA.w600.h600.121062-new-800-800.jpg?context=bWFzdGVyfHJvb3R8Mjc2MjV8aW1hZ2UvanBlZ3xoZWQvaDhiLzk4ODI5MjA3MTQyNzAuanBnfGMzNzk3MjE3ZWQwY2I1YWFhMTQ0YTgwZDk3ODc1ZGZkMjdjY2QwNzcyMjQ5MjA4YTNiYjcwNmRmMGJmZDk2ZTY&ccv=VUtSLU8=",
+        "data/media/post_11_f4ffe234.jpg",
+        "data/media/post_12_26fb454c.jpg",
+        "data/media/post_19_0922c3d5.jpg",
     ],
     "Artistry": [
-        "https://web.archive.org/web/20211011111853im_/https://www.amway.ua/common/medias/EIA.w600.h600.123800-2-170221.png?context=bWFzdGVyfHJvb3R8MTUyMzYzfGltYWdlL3BuZ3xoZmUvaDlkLzk0OTAxODc0ODUyMTQucG5nfGJmODEwYmQ3MjQ0OTZjN2QyZGQ5NjMxNTkxY2M5ZTEwMDJlYThkMzk3NGU2NmI5NDk4ZjNjMjllNmI2MTg5NGU&ccv=VUtSLU8=",
-        "https://web.archive.org/web/20220330222304im_/https://www.amway.ua/common/medias/EIA.w600.h600.118208-1-11.02.21.jpg?context=bWFzdGVyfHJvb3R8MTU1MjF8aW1hZ2UvanBlZ3xoM2YvaGMwLzk1MDk4NTI2MTA1OTAuanBnfGY0NjAwYzZhYzBmZmZmNTQ1NzQyYWQxMWZkYjhiMDcxMjIxNGMyZTgzODAwMzVkZWM1N2M5OGMxMzFiMDhjYjQ&ccv=VUtSLU8=",
+        "data/media/post_13_e5c3ccda.jpg",
+        "data/media/post_14_fa2399c4.jpg",
+        "data/media/post_15_5fc5454a.jpg",
     ],
     "Home Care": [
-        "https://web.archive.org/web/20220305140333im_/https://www.amway.ua/common/medias/EIA.w600.h600.124485-E-20210623.jpg?context=bWFzdGVyfHJvb3R8NDY1NzN8aW1hZ2UvanBlZ3xoZmQvaGE3Lzk1MjUwNzc2MDY0MzAuanBnfDZkYmQ1YTBhOTQxY2FhZjg2MWJlMWZjZDE5MzhlMTVjYzkyYTZlMDgxZWE4MjBiYzY2NDcxY2RkYzZlYWJkODY&ccv=VUtSLU8=",
-        "https://web.archive.org/web/20220305141444im_/https://www.amway.ua/common/medias/EIA.w600.h600.110488-E-20210623.jpg?context=bWFzdGVyfHJvb3R8MjE0Njh8aW1hZ2UvanBlZ3xoMzQvaDgyLzk1MjUwOTAyMjIxMTAuanBnfGM4NmM4ZjIwMTRjNWI1ZTUyNDc5ZGJjYWFiZmUyZGI0ZWYzNDllM2JjYThhZmIxNGM4ODhkMjRmZjYwMzk0MGM&ccv=VUtSLU8=",
+        "data/media/post_16_de56257c.jpg",
+        "data/media/post_17_53d18f48.jpg",
+        "data/media/post_18_e2195dd6.jpg",
     ],
     "default": [
-        "https://web.archive.org/web/20220322173449im_/https://www.amway.ua/common/medias/EIA.w600.h600.119797-20210623.jpg?context=bWFzdGVyfHJvb3R8Mjk0ODR8aW1hZ2UvanBlZ3xoZTcvaDIzLzk1MjUwNjU4NzU0ODYuanBnfGM0MDNmOTU2YTIyZWM5Zjg4YzBmZDAxZTg3NjRkYWY2NGMwMjNhNzVhZTUyZDY5Y2FhY2ExYWYwYzRkZTE5YzQ&ccv=VUtSLU8=",
+        "data/media/post_8_dd22cf0c.jpg",
     ],
 }
 

@@ -57,13 +57,9 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "Running scheduled publish from prepared queue..."
-            python -m src.main --publish-prepared
-          else
-            echo "Running manual live pipeline execution..."
-            xvfb-run -a python -m src.main
-          fi
+          echo "Publishing post from prepared queue..."
+          python -m src.main --publish-prepared
+
 
       - name: Upload updated state
         if: always()
