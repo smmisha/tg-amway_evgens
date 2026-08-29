@@ -324,14 +324,17 @@ async def run_prepare():
                     attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
                     continue
 
-            # Save prepared draft — store the ORIGINAL HTTP URL from the
-            # article page, not the local temp path. The local file won't
-            # exist in the publish workflow's GitHub Actions environment.
+            # Save prepared draft
             original_image_url = ""
             for img_url in article.images:
-                if img_url.startswith("http"):
+                if img_url.startswith("http") or img_url.startswith("data/media/"):
                     original_image_url = img_url
                     break
+            if not original_image_url and image_path and os.path.exists(image_path):
+                # If image was resolved from persistent media, preserve it
+                if not os.path.basename(os.path.dirname(image_path)).startswith("amway_media_"):
+                    original_image_url = image_path
+
             post_draft = {
                 "url": article.url,
                 "title": article.title,
@@ -387,8 +390,8 @@ async def run_publish_prepared(dry_run: bool = False):
     title = post_draft.get("title", "")
 
     image_path = None
-    if image_url:
-        image_path = await download_first_image([image_url], product_line=product_line, title=title, url=url)
+    candidate_urls = [image_url] if image_url else []
+    image_path = await download_first_image(candidate_urls, product_line=product_line, title=title, url=url)
 
     try:
         if dry_run:

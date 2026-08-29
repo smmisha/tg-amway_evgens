@@ -185,11 +185,102 @@ def _load_catalog_images_for_product(url: str, title: str) -> list[str]:
         return []
 
 
+async def autonomous_resolve_product_image(
+    title: str,
+    product_line: str = "default",
+    sku: str = "",
+    url: str = "",
+    output_dir: str | None = None,
+) -> str | None:
+    """Autonomously fetch and AI-verify official product photo from web/CDN."""
+    import re
+    import urllib.parse
+    try:
+        from curl_cffi import requests as cffi_requests
+    except ImportError:
+        logger.warning("curl_cffi not installed, skipping autonomous web image search")
+        return None
+
+    # Extract SKU from URL if not explicitly provided
+    if not sku and url:
+        m = re.search(r"/p/(\d+)", url)
+        if m:
+            sku = m.group(1)
+
+    clean_title = re.sub(r"[^\w\s-]", " ", title).strip()
+    query_parts = ["Amway", product_line if product_line != "default" else "", clean_title, sku]
+    query = " ".join(p for p in query_parts if p).strip()
+
+    logger.info(f"Initiating autonomous image search for query: '{query}'")
+    encoded_q = urllib.parse.quote(query)
+    search_url = f"https://www.bing.com/images/search?q={encoded_q}&form=HDRSC2&first=1"
+
+    try:
+        res = cffi_requests.get(search_url, impersonate="chrome124", timeout=15)
+        if res.status_code != 200:
+            logger.warning(f"Search request failed with status {res.status_code}")
+            return None
+
+        murls = re.findall(r'murl&quot;:&quot;(http[^&]+)&quot;', res.text)
+        if not murls:
+            murls = re.findall(r'"murl":"(http[^"]+)"', res.text)
+
+        if not murls:
+            logger.info(f"No image candidates found for '{query}'")
+            return None
+
+        # Prioritize official/high quality domains
+        def score_url(u: str) -> int:
+            score = 0
+            u_lower = u.lower()
+            if "amway" in u_lower: score += 15
+            if "sys-master" in u_lower: score += 10
+            if "product" in u_lower: score += 5
+            if u_lower.endswith((".jpg", ".jpeg", ".png", ".webp")): score += 3
+            if any(bad in u_lower for bad in ["logo", "banner", "icon", "vector", "person", "man", "woman"]): score -= 20
+            return score
+
+        murls.sort(key=score_url, reverse=True)
+        top_candidates = murls[:6]
+        logger.info(f"Evaluating {len(top_candidates)} candidate images with AI Vision...")
+
+        # Lazy import validator to prevent circular deps
+        from src.media_validator import validate_image_with_gemini_vision
+
+        for i, candidate_url in enumerate(top_candidates, 1):
+            logger.info(f"Downloading candidate [{i}/{len(top_candidates)}]: {candidate_url[:80]}...")
+            local_path = await download_image(candidate_url, output_dir=output_dir)
+            if not local_path or not os.path.exists(local_path):
+                continue
+
+            # Verify candidate image with Gemini Vision
+            is_valid = await validate_image_with_gemini_vision(
+                image_path=local_path,
+                topic_title=title,
+                product_line=product_line,
+                post_text=f"Product post about {title}"
+            )
+            if is_valid:
+                logger.info(f"🎯 Candidate [{i}] verified by AI Vision: {candidate_url}")
+                return local_path
+            else:
+                logger.info(f"Candidate [{i}] rejected by AI Vision (not matching product). Cleaning up.")
+                cleanup_temp_media(local_path)
+
+        logger.info("None of the image candidates passed AI Vision verification.")
+        return None
+
+    except Exception as e:
+        logger.warning(f"Autonomous image search failed for '{query}': {e}")
+        return None
+
+
 async def download_first_image(
     image_urls: list[str],
     product_line: str = "default",
     title: str = "",
     url: str = "",
+    sku: str = "",
 ) -> str | None:
     """Download the first available image matching THIS SPECIFIC product.
 
@@ -197,13 +288,15 @@ async def download_first_image(
     1. Scraped image URLs from the article page (og:image, img tags)
     2. Catalog images for THIS specific product from products_catalog.json
     3. Exact 1:1 local fallback image (only if title explicitly matches the product)
-    4. None (text-only post — infinitely better than a wrong product's picture!)
+    4. Autonomous web search & AI Vision verification (zero-key TLS resolver)
+    5. None (text-only post — infinitely better than a wrong product's picture!)
 
     Args:
         image_urls: List of candidate scraped URLs
         product_line: Amway product category
         title: Article or product title
         url: Article URL
+        sku: Product SKU article number
 
     Returns:
         Local file path to downloaded product image, or None.
@@ -235,7 +328,19 @@ async def download_first_image(
                 logger.info(f"Using exact 1:1 fallback image [{subtopic_key}]: {img_url}")
                 return filepath
 
-    # 4. No exact image -> Text-only post
+    # 4. Autonomous zero-intervention Web & AI Vision Resolver
+    if title:
+        auto_img = await autonomous_resolve_product_image(
+            title=title,
+            product_line=product_line,
+            sku=sku,
+            url=url,
+        )
+        if auto_img:
+            logger.info(f"Using autonomously resolved & AI-verified image: {auto_img}")
+            return auto_img
+
+    # 5. No exact image -> Text-only post
     logger.info(f"No exact image for '{title}' [{product_line}]. Publishing as text-only post.")
     return None
 

@@ -36,11 +36,16 @@ class Article:
     images: list[str] = field(default_factory=list)
     category: str = ""
     product_line: str = ""  # XS, Nutrilite, Artistry, Home Care
+    sku: str = ""
     scraped_at: str = ""
 
     def __post_init__(self):
         if not self.scraped_at:
             self.scraped_at = datetime.now(timezone.utc).isoformat()
+        if not self.sku and self.url:
+            m = re.search(r"/p/(\d+)", self.url)
+            if m:
+                self.sku = m.group(1)
 
 
 def detect_product_line(text: str) -> str:
