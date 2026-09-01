@@ -152,6 +152,13 @@ async def run(dry_run: bool = False):
                 continue
             if image_path:
                 logger.info(f"Image ready: {image_path}")
+            else:
+                # STRICT RULE: every post requires official image — skip text-only candidates
+                logger.warning(f"STRICT: No official image for '{article.title}' — skipping candidate (next in pool)")
+                if not dry_run:
+                    attempts.mark_attempted(article.url, reason="no_official_image")
+                failures.append(f"{article.title} — no_official_image (strict rule: only amway.ua/amstack official)")
+                continue
 
             # ── Step 5: Native Multimodal Rewrite via Gemini 3.6 Flash ────
             logger.info("[Step 5/7] Generating post via Gemini 3.6 Flash (Multimodal)...")
@@ -310,6 +317,10 @@ async def run_prepare():
                 title=article.title,
                 url=article.url,
             )
+            if not image_path:
+                logger.warning(f"STRICT prepare: No official image for '{article.title}' — skipping (no text-only)")
+                attempts.mark_attempted(article.url, reason="no_official_image")
+                continue
             
             post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
             
@@ -381,6 +392,19 @@ async def run_publish_prepared(dry_run: bool = False):
         # Exit gracefully — do NOT fall back to live pipeline, as it adds
         # ~30 min of scraping and can push the post into late night hours.
         return
+
+    # Fail-fast: ensure publish target is configured explicitly
+    from config.settings import TELEGRAM_GROUP_CHAT_ID
+    if not TELEGRAM_GROUP_CHAT_ID:
+        logger.error(
+            "TELEGRAM_GROUP_CHAT_ID is empty — refusing to publish to fallback chat. "
+            "Set TELEGRAM_GROUP_CHAT_ID in .env / GitHub Secrets."
+        )
+        # Return draft to queue if we popped it
+        if not dry_run:
+            prepared.add_prepared(post_draft)
+        import sys as _sys
+        _sys.exit(5)
 
     logger.info(f"Publishing prepared post: {post_draft.get('title')}")
     text = post_draft.get("text", "")

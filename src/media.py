@@ -185,14 +185,32 @@ def _load_catalog_images_for_product(url: str, title: str) -> list[str]:
         return []
 
 
+OFFICIAL_IMAGE_DOMAINS = [
+    "amway.ua",
+    "amway.com",
+    "amway.eu",
+    "amstack",
+    "s3-eu-central-1.amazonaws.com",
+    "amway-media",
+]
+
+def _is_official_image_url(url: str) -> bool:
+    """True if URL is from Amway official domain/CDN."""
+    u = (url or "").lower()
+    return any(d in u for d in OFFICIAL_IMAGE_DOMAINS)
+
+
 async def autonomous_resolve_product_image(
     title: str,
     product_line: str = "default",
     sku: str = "",
     url: str = "",
     output_dir: str | None = None,
+    strict_official: bool = True,
 ) -> str | None:
-    """Autonomously fetch and AI-verify official product photo from web/CDN."""
+    """Autonomously fetch and AI-verify official product photo from web/CDN.
+    If strict_official=True, only Amway official domains are accepted.
+    """
     import re
     import urllib.parse
     try:
@@ -229,6 +247,16 @@ async def autonomous_resolve_product_image(
             logger.info(f"No image candidates found for '{query}'")
             return None
 
+        # Strict official filter: drop non-Amway domains before scoring
+        if strict_official:
+            official_candidates = [u for u in murls if _is_official_image_url(u)]
+            if official_candidates:
+                murls = official_candidates
+                logger.info(f"Strict official mode: {len(murls)} official candidates kept from {len(murls)} total")
+            else:
+                logger.warning(f"Strict official mode: no official domain candidates for '{query}' — aborting search (no non-official allowed)")
+                return None
+
         # Prioritize official/high quality domains
         def score_url(u: str) -> int:
             score = 0
@@ -238,6 +266,7 @@ async def autonomous_resolve_product_image(
             if "product" in u_lower: score += 5
             if u_lower.endswith((".jpg", ".jpeg", ".png", ".webp")): score += 3
             if any(bad in u_lower for bad in ["logo", "banner", "icon", "vector", "person", "man", "woman"]): score -= 20
+            if _is_official_image_url(u): score += 20
             return score
 
         murls.sort(key=score_url, reverse=True)
@@ -328,20 +357,21 @@ async def download_first_image(
                 logger.info(f"Using exact 1:1 fallback image [{subtopic_key}]: {img_url}")
                 return filepath
 
-    # 4. Autonomous zero-intervention Web & AI Vision Resolver
+    # 4. Autonomous zero-intervention Web & AI Vision Resolver (official only)
     if title:
         auto_img = await autonomous_resolve_product_image(
             title=title,
             product_line=product_line,
             sku=sku,
             url=url,
+            strict_official=True,
         )
         if auto_img:
-            logger.info(f"Using autonomously resolved & AI-verified image: {auto_img}")
+            logger.info(f"Using autonomously resolved & AI-verified OFFICIAL image: {auto_img}")
             return auto_img
 
-    # 5. No exact image -> Text-only post
-    logger.info(f"No exact image for '{title}' [{product_line}]. Publishing as text-only post.")
+    # 5. STRICT RULE: every post MUST have official image — no text-only
+    logger.warning(f"STRICT: No official image for '{title}' [{product_line}]. Skipping candidate (no text-only allowed).")
     return None
 
 

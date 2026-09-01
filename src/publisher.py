@@ -19,12 +19,15 @@ from config.settings import (
 logger = logging.getLogger(__name__)
 
 
-def resolve_target_chat(chat_id: str | None) -> str:
+def resolve_target_chat(chat_id: str | None, strict: bool = False) -> str:
     """Return the effective publish target chat id.
     Resolution order (config/settings.py): explicit arg -> GROUP -> ADMIN -> CHAT.
+    If strict=True, only GROUP is allowed (no fallback to admin/chat).
     """
     if chat_id:
         return chat_id
+    if strict:
+        return TELEGRAM_GROUP_CHAT_ID or ""
     return TELEGRAM_GROUP_CHAT_ID or TELEGRAM_ADMIN_CHAT_ID or TELEGRAM_CHAT_ID or ""
 
 
