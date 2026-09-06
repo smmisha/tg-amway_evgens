@@ -434,7 +434,7 @@ async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.u
         )
         if os.path.exists(catalog_file):
             try:
-                with open(catalog_file, "r", encoding="utf-8") as f:
+                with open(catalog_file, "r", encoding="utf-8-sig") as f:
                     catalog_data = json.load(f)
                 for item in catalog_data:
                     if len(articles) >= max_articles:

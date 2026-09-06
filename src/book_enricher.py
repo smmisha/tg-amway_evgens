@@ -23,7 +23,7 @@ def load_books_bundle() -> dict:
         logger.warning(f"Books bundle not found: {BOOKS_BUNDLE_JSON}")
         return {"books": []}
 
-    with open(BOOKS_BUNDLE_JSON, "r", encoding="utf-8") as f:
+    with open(BOOKS_BUNDLE_JSON, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

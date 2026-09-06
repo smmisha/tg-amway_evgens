@@ -10,6 +10,7 @@ node_modules/
 *.log
 .pytest_cache/
 .chrome-profile/
+tmp_state/
 .env.*
 *.bak
 data/*.bak

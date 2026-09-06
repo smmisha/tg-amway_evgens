@@ -158,7 +158,7 @@ def _load_catalog_images_for_product(url: str, title: str) -> list[str]:
     if not os.path.exists(catalog_file):
         return []
     try:
-        with open(catalog_file, "r", encoding="utf-8") as f:
+        with open(catalog_file, "r", encoding="utf-8-sig") as f:
             catalog = _json.load(f)
         urls = []
         clean_url = (url or "").strip().rstrip("/")

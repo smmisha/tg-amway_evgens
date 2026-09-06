@@ -6,8 +6,11 @@ to the repo so GitHub Actions can persist state across runs.
 
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 ATTEMPTED_COOLDOWN_DEFAULT_DAYS = 7
 
@@ -23,10 +26,11 @@ class Storage:
     def _load(self):
         if os.path.exists(self.filepath):
             try:
-                with open(self.filepath, "r", encoding="utf-8") as f:
+                with open(self.filepath, "r", encoding="utf-8-sig") as f:
                     content = f.read().strip()
                     self._data = json.loads(content) if content else []
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load storage from {self.filepath}: {e}")
                 self._data = []
         else:
             self._data = []
@@ -80,10 +84,11 @@ class AttemptStorage:
     def _load(self):
         if os.path.exists(self.filepath):
             try:
-                with open(self.filepath, "r", encoding="utf-8") as f:
+                with open(self.filepath, "r", encoding="utf-8-sig") as f:
                     content = f.read().strip()
                     self._data = json.loads(content) if content else []
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load attempt storage from {self.filepath}: {e}")
                 self._data = []
         else:
             self._data = []
@@ -146,10 +151,11 @@ class PreparedStorage:
     def _load(self):
         if os.path.exists(self.filepath):
             try:
-                with open(self.filepath, "r", encoding="utf-8") as f:
+                with open(self.filepath, "r", encoding="utf-8-sig") as f:
                     content = f.read().strip()
                     self._data = json.loads(content) if content else []
-            except (json.JSONDecodeError, IOError):
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"Failed to load prepared storage from {self.filepath}: {e}")
                 self._data = []
         else:
             self._data = []
