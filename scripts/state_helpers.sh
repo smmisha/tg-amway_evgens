@@ -36,14 +36,20 @@ restore_state() {
   mkdir -p "${extract_dir}"
   (cd "${extract_dir}" && unzip -o "${RUNNER_TEMP}/amway-state.zip")
 
-  # upload-artifact may flatten data/*.json to the zip root, or keep a data/ prefix
-  if compgen -G "${extract_dir}/data/*.json" > /dev/null 2>&1; then
-    cp "${extract_dir}"/data/*.json "${GITHUB_WORKSPACE}/data/"
-  else
-    cp "${extract_dir}"/*.json "${GITHUB_WORKSPACE}/data/"
-  fi
+  # Restore ONLY mutable runtime state files.
+  # NEVER overwrite git-tracked static data (products_catalog.json, books_bundle.json).
+  local state_files=("published.json" "attempted.json" "prepared_posts.json" "last_update_id.txt")
+  local restored=0
 
-  local count
-  count="$(find "${GITHUB_WORKSPACE}/data" -name '*.json' 2>/dev/null | wc -l)"
-  echo "[state] Restored ${count} json file(s)."
+  for sf in "${state_files[@]}"; do
+    if [[ -f "${extract_dir}/data/${sf}" ]]; then
+      cp -f "${extract_dir}/data/${sf}" "${GITHUB_WORKSPACE}/data/${sf}"
+      restored=$((restored + 1))
+    elif [[ -f "${extract_dir}/${sf}" ]]; then
+      cp -f "${extract_dir}/${sf}" "${GITHUB_WORKSPACE}/data/${sf}"
+      restored=$((restored + 1))
+    fi
+  done
+
+  echo "[state] Restored ${restored} runtime state file(s). Protected git-tracked catalog and books."
 }

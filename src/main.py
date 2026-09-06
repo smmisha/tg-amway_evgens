@@ -19,7 +19,10 @@ Usage:
 """
 
 import asyncio
+from datetime import datetime, timezone
+import json
 import logging
+import os
 import random
 import sys
 
@@ -28,6 +31,7 @@ from config.settings import (
     BOOK_ENRICHMENT_PROBABILITY,
     CANDIDATE_POOL_SIZE,
     MAX_ARTICLES_PER_RUN,
+    PUBLISHED_COOLDOWN_DAYS,
     PUBLISHED_JSON,
     SCRAPE_DELAY_SECONDS,
     SCRAPE_SECTIONS,
@@ -68,6 +72,53 @@ def _log_telegram_targets():
         )
 
 
+def select_candidates(
+    articles: list[Article],
+    storage: Storage,
+    attempts: AttemptStorage,
+    pool_size: int = CANDIDATE_POOL_SIZE,
+) -> list[Article]:
+    """Filter and rank candidate articles:
+    1. First priority: brand new, never-published articles (and not in attempt cooldown).
+    2. Second priority: evergreen recycling of articles published > PUBLISHED_COOLDOWN_DAYS ago,
+       sorted by least recently published first.
+    Pool is filled up to pool_size with fresh candidates first, then supplemented with eligible
+    recycled candidates so that failures on fresh items don't starve the run.
+    """
+    fresh = [
+        a for a in articles
+        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
+    ]
+    candidates = list(fresh[:pool_size])
+
+    if len(candidates) < pool_size:
+        already_selected = {c.url for c in candidates}
+        recycled = [
+            a for a in articles
+            if a.url not in already_selected
+            and storage.is_published(a.url)
+            and not storage.is_published(a.url, cooldown_days=PUBLISHED_COOLDOWN_DAYS)
+            and not attempts.is_attempted(a.url)
+        ]
+        if recycled:
+            recycled.sort(
+                key=lambda a: storage.get_last_published_at(a.url) or datetime.min.replace(tzinfo=timezone.utc)
+            )
+            needed = pool_size - len(candidates)
+            candidates.extend(recycled[:needed])
+            logger.info(
+                f"Candidate filtering: pool contains {len(fresh[:pool_size])} fresh and "
+                f"{min(len(recycled), needed)} eligible evergreen recycled candidates."
+            )
+
+    if candidates:
+        logger.info(f"Candidate filtering: selected total {len(candidates)} candidate(s) for processing.")
+        return candidates
+
+    logger.warning("Candidate filtering: no fresh or evergreen recycled candidates found.")
+    return []
+
+
 async def run(dry_run: bool = False):
     """Execute the full pipeline."""
     logger.info("=" * 50)
@@ -94,25 +145,14 @@ async def run(dry_run: bool = False):
 
     # ── Step 2: Filter ────────────────────────────────────────────────
     logger.info("[Step 2/7] Filtering candidates...")
-    new_articles = [
-        a
-        for a in articles
-        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
-    ]
-    logger.info(f"New articles after filtering: {len(new_articles)}")
+    selected = select_candidates(articles, storage, attempts, CANDIDATE_POOL_SIZE)
 
-    if not new_articles:
+    if not selected:
         logger.error(
-            "No fresh candidates after filtering published + failed(cooldown) "
-            "articles. Skipping run (no posts published)."
+            "No fresh or eligible evergreen candidates after filtering. "
+            "Skipping run (no posts published)."
         )
         sys.exit(2)
-
-    # Iterate over a POOL of candidates. We stop on the first that fully
-    # succeeds (goal: MAX_ARTICLES_PER_RUN=1 post per day) instead of
-    # aborting on the first failure. Failed candidates are recorded so next
-    # run starts from the next article and not the same broken one.
-    selected = new_articles[:CANDIDATE_POOL_SIZE]
 
     logger.info(f"Selected {len(selected)} items for processing (pool={CANDIDATE_POOL_SIZE})")
 
@@ -296,79 +336,126 @@ async def run_prepare():
         delay=SCRAPE_DELAY_SECONDS,
         max_articles=CANDIDATE_POOL_SIZE * 2,
     )
-    new_articles = [
-        a for a in articles
-        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
-    ]
+    selected = select_candidates(articles, storage, attempts, CANDIDATE_POOL_SIZE)
 
-    if not new_articles:
-        logger.error("No fresh candidates for preparation. Skipping.")
+    if not selected:
+        logger.error("No fresh or eligible evergreen candidates for preparation. Skipping.")
         sys.exit(2)
 
-    selected = new_articles[:CANDIDATE_POOL_SIZE]
-
     for article in selected:
-        image_path = None
-        try:
-            book_context = get_book_enrichment() if random.random() < BOOK_ENRICHMENT_PROBABILITY else None
-            image_path = await download_first_image(
-                article.images,
-                article.product_line,
-                title=article.title,
-                url=article.url,
-            )
-            if not image_path:
-                logger.warning(f"STRICT prepare: No official image for '{article.title}' — skipping (no text-only)")
-                attempts.mark_attempted(article.url, reason="no_official_image")
-                continue
-            
-            post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
-            
-            if image_path:
-                vision_ok = await validate_image_with_gemini_vision(
-                    image_path=image_path,
-                    topic_title=article.title,
-                    product_line=article.product_line,
-                    post_text=post_text,
-                )
-                if not vision_ok:
-                    attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
-                    continue
-
-            # Save prepared draft
-            original_image_url = ""
-            for img_url in article.images:
-                if img_url.startswith("http") or img_url.startswith("data/media/"):
-                    original_image_url = img_url
-                    break
-            if not original_image_url and image_path and os.path.exists(image_path):
-                # If image was resolved from persistent media, preserve it
-                if not os.path.basename(os.path.dirname(image_path)).startswith("amway_media_"):
-                    original_image_url = image_path
-
-            post_draft = {
-                "url": article.url,
-                "title": article.title,
-                "text": post_text,
-                "image_url": original_image_url,
-                "product_line": article.product_line,
-            }
-            prepared.add_prepared(post_draft)
+        draft = await prepare_article_draft(article, attempts)
+        if draft:
+            # We don't persist temporary image_path in queue across runs; image_url is re-resolved
+            image_path = draft.pop("image_path", None)
+            cleanup_temp_media(image_path)
+            prepared.add_prepared(draft)
             logger.info(f"Successfully prepared post draft: {article.title}")
             logger.info(f"Prepared posts queue size: {prepared.count()}")
             return
-        except Exception as e:
-            logger.warning(f"Preparation failed for {article.title}: {e}")
-            attempts.mark_attempted(article.url, reason=f"prepare_error: {e}")
-        finally:
-            cleanup_temp_media(image_path)
 
     logger.error("Failed to prepare any post draft from pool.")
     sys.exit(4)
 
 
+async def prepare_article_draft(article: Article, attempts: AttemptStorage) -> dict | None:
+    """Prepare a full post draft (download media, LLM rewrite, vision validation) for an article."""
+    image_path = None
+    try:
+        book_context = get_book_enrichment() if random.random() < BOOK_ENRICHMENT_PROBABILITY else None
+        image_path = await download_first_image(
+            article.images,
+            article.product_line,
+            title=article.title,
+            url=article.url,
+        )
+        if not image_path:
+            logger.warning(f"STRICT: No official image for '{article.title}' — skipping (no text-only)")
+            attempts.mark_attempted(article.url, reason="no_official_image")
+            return None
+
+        post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
+
+        vision_ok = await validate_image_with_gemini_vision(
+            image_path=image_path,
+            topic_title=article.title,
+            product_line=article.product_line,
+            post_text=post_text,
+        )
+        if not vision_ok:
+            logger.warning(f"Vision validation rejected {article.title}")
+            attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
+            cleanup_temp_media(image_path)
+            return None
+
+        # Resolve image URL for persistence
+        original_image_url = ""
+        for img_url in article.images:
+            if img_url.startswith("http") or img_url.startswith("data/media/"):
+                original_image_url = img_url
+                break
+        if not original_image_url and image_path and os.path.exists(image_path):
+            if not os.path.basename(os.path.dirname(image_path)).startswith("amway_media_"):
+                original_image_url = image_path
+
+        return {
+            "url": article.url,
+            "title": article.title,
+            "text": post_text,
+            "image_url": original_image_url,
+            "image_path": image_path,
+            "product_line": article.product_line,
+        }
+    except Exception as e:
+        logger.warning(f"Draft preparation failed for {article.title}: {e}")
+        attempts.mark_attempted(article.url, reason=f"prepare_error: {e}")
+        cleanup_temp_media(image_path)
+        return None
+
+
+async def _generate_direct_catalog_draft(storage: Storage, attempts: AttemptStorage) -> dict | None:
+    """Generate 1 post draft directly from products_catalog.json (fast fallback without Playwright)."""
+    from src.scraper import detect_product_line
+    catalog_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "products_catalog.json"
+    )
+    if not os.path.exists(catalog_file):
+        logger.error(f"Products catalog file not found: {catalog_file}")
+        return None
+
+    try:
+        with open(catalog_file, "r", encoding="utf-8-sig") as f:
+            catalog_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to read products catalog: {e}")
+        return None
+
+    catalog_articles = [
+        Article(
+            url=item.get("url", ""),
+            title=item.get("title", ""),
+            body=item.get("body", ""),
+            images=item.get("images", []),
+            category=item.get("category", "catalog"),
+            product_line=item.get("product_line", detect_product_line(item.get("title", ""))),
+        )
+        for item in catalog_data
+    ]
+
+    selected = select_candidates(catalog_articles, storage, attempts)
+    if not selected:
+        logger.error("No eligible candidates in catalog for direct generation.")
+        return None
+
+    for article in selected:
+        draft = await prepare_article_draft(article, attempts)
+        if draft:
+            return draft
+
+    return None
+
+
 async def run_publish_prepared(dry_run: bool = False):
-    """Publish a prepared post from queue, or fallback to live pipeline if queue is empty."""
+    """Publish a prepared post from queue, or fallback to direct catalog generation if queue is empty."""
     from config.settings import PREPARED_POSTS_JSON
     from src.storage import PreparedStorage
 
@@ -378,19 +465,25 @@ async def run_publish_prepared(dry_run: bool = False):
 
     prepared = PreparedStorage(PREPARED_POSTS_JSON)
     storage = Storage(PUBLISHED_JSON)
+    attempts = AttemptStorage(ATTEMPTED_JSON)
 
+    was_popped = False
     if dry_run:
         post_draft = prepared._data[0] if prepared._data else None
     else:
         post_draft = prepared.pop_prepared()
+        was_popped = (post_draft is not None)
 
     if not post_draft:
         logger.warning(
-            "Prepared queue is empty. No posts to publish. "
-            "The prepare workflow should fill the queue before publish runs."
+            "Prepared queue is empty. Triggering fast catalog fallback to avoid missing daily post..."
         )
-        # Exit gracefully — do NOT fall back to live pipeline, as it adds
-        # ~30 min of scraping and can push the post into late night hours.
+        post_draft = await _generate_direct_catalog_draft(storage, attempts)
+
+    if not post_draft:
+        logger.error("Prepared queue was empty and catalog fallback yielded no post. Exiting with error.")
+        if not dry_run:
+            sys.exit(6)
         return
 
     # Fail-fast: ensure publish target is configured explicitly
@@ -400,8 +493,8 @@ async def run_publish_prepared(dry_run: bool = False):
             "TELEGRAM_GROUP_CHAT_ID is empty — refusing to publish to fallback chat. "
             "Set TELEGRAM_GROUP_CHAT_ID in .env / GitHub Secrets."
         )
-        # Return draft to queue if we popped it
-        if not dry_run:
+        # Return draft to queue if we popped it from prepared storage
+        if not dry_run and was_popped and not post_draft.get("image_path"):
             prepared.add_prepared(post_draft)
         import sys as _sys
         _sys.exit(5)
@@ -413,9 +506,10 @@ async def run_publish_prepared(dry_run: bool = False):
     url = post_draft.get("url", "")
     title = post_draft.get("title", "")
 
-    image_path = None
-    candidate_urls = [image_url] if image_url else []
-    image_path = await download_first_image(candidate_urls, product_line=product_line, title=title, url=url)
+    image_path = post_draft.get("image_path")
+    if not image_path:
+        candidate_urls = [image_url] if image_url else []
+        image_path = await download_first_image(candidate_urls, product_line=product_line, title=title, url=url)
 
     try:
         if dry_run:
@@ -429,6 +523,11 @@ async def run_publish_prepared(dry_run: bool = False):
             storage.mark_published(url=url, title=title, telegram_message_id=message_id)
 
         logger.info(f"Successfully published prepared post (Message ID: {message_id})")
+    except Exception:
+        # Re-queue the post draft so it is not permanently lost on transient network/API failures
+        if not dry_run and was_popped and not post_draft.get("image_path"):
+            prepared.add_prepared(post_draft)
+        raise
     finally:
         cleanup_temp_media(image_path)
 

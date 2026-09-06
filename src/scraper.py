@@ -437,8 +437,6 @@ async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.u
                 with open(catalog_file, "r", encoding="utf-8-sig") as f:
                     catalog_data = json.load(f)
                 for item in catalog_data:
-                    if len(articles) >= max_articles:
-                        break
                     url = item.get("url", "")
                     if url in scraped_urls:
                         continue

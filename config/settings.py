@@ -16,6 +16,7 @@ SCRAPE_SECTIONS = [
 MAX_ARTICLES_PER_RUN = 1  # goal: one published post per run/day
 CANDIDATE_POOL_SIZE = 8  # how many fresh candidates we try before giving up the run
 ATTEMPTED_COOLDOWN_DAYS = 7  # skip previously-failed articles for this many days
+PUBLISHED_COOLDOWN_DAYS = int(os.getenv("PUBLISHED_COOLDOWN_DAYS", "14"))  # evergreen recycle interval (days)
 SCRAPE_DELAY_SECONDS = 10  # robots.txt: 1 request per 10 seconds
 # DataDome anti-bot: only a REAL headful browser (channel="chrome"/"msedge")
 # passes. Persistent profile stores the DataDome cookie between runs.

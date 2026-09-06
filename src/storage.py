@@ -48,9 +48,47 @@ class Storage:
     def _hash_url(url: str) -> str:
         return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
 
-    def is_published(self, url: str) -> bool:
+    def is_published(self, url: str, cooldown_days: int | None = None) -> bool:
+        """Check if an article has been published.
+        If cooldown_days is provided, returns True only if published within the last
+        cooldown_days (allowing evergreen content recycling after the cooldown).
+        """
         url_hash = self._hash_url(url)
-        return any(item.get("hash") == url_hash for item in self._data)
+        if cooldown_days is None:
+            return any(item.get("hash") == url_hash for item in self._data)
+
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=cooldown_days)
+        for item in reversed(self._data):
+            if item.get("hash") == url_hash:
+                published_at_str = item.get("published_at")
+                if not published_at_str:
+                    return True
+                try:
+                    pub_dt = datetime.fromisoformat(published_at_str)
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    return pub_dt > cutoff
+                except (ValueError, TypeError):
+                    return True
+        return False
+
+    def get_last_published_at(self, url: str) -> datetime | None:
+        """Return the datetime when this URL was most recently published, or None."""
+        url_hash = self._hash_url(url)
+        for item in reversed(self._data):
+            if item.get("hash") == url_hash:
+                published_at_str = item.get("published_at")
+                if not published_at_str:
+                    return None
+                try:
+                    pub_dt = datetime.fromisoformat(published_at_str)
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    return pub_dt
+                except (ValueError, TypeError):
+                    return None
+        return None
 
     def mark_published(self, url: str, title: str = "", telegram_message_id: str = ""):
         self._data.append({

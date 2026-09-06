@@ -71,9 +71,14 @@ jobs:
           fi
 
       - name: Upload updated state
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: amway-state
-          path: data/*.json
+          path: |
+            data/published.json
+            data/attempted.json
+            data/prepared_posts.json
+            data/last_update_id.txt
           if-no-files-found: ignore
           retention-days: 7
