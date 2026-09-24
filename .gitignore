@@ -15,3 +15,5 @@ tmp_state/
 *.bak
 data/*.bak
 .vscode/
+desktop.ini
+*.ico

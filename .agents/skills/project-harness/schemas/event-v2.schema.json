@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-harness.dev/schema/event-v2.schema.json",
+  "title": "Project Harness history event v2",
+  "type": "object",
+  "required": ["event_id", "recorded_at", "actor", "kind", "subject_id", "intended_effect_id", "previous_status", "new_status", "reason", "references"],
+  "properties": {
+    "event_id": {"type": "string", "pattern": "^EVT-[A-Za-z0-9._-]+$"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "actor": {"type": "string", "minLength": 1},
+    "kind": {"type": "string", "minLength": 1},
+    "subject_id": {"type": ["string", "null"]},
+    "intended_effect_id": {"type": ["string", "null"], "pattern": "^EFF-[A-Za-z0-9._-]+$"},
+    "previous_status": {"type": ["string", "null"]},
+    "new_status": {"type": ["string", "null"]},
+    "reason": {"type": "string", "minLength": 1},
+    "references": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "extensions": {"type": "object"}
+  },
+  "additionalProperties": false
+}

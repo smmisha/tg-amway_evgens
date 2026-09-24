@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-harness.dev/schema/check-v2.schema.json",
+  "title": "Project Harness check record v2",
+  "type": "object",
+  "required": ["id", "status", "required", "requirement_ids", "task_ids", "method", "subject", "input_paths", "snapshot_fingerprint", "environment", "executed_at", "evidence_refs", "invalidated_by"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^CHK-[A-Za-z0-9._-]+$"},
+    "status": {"enum": ["planned", "running", "passed", "failed", "blocked", "skipped", "not_applicable", "stale"]},
+    "required": {"type": "boolean"},
+    "requirement_ids": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Za-z0-9._-]+$"}, "uniqueItems": true},
+    "task_ids": {"type": "array", "items": {"type": "string", "pattern": "^TASK-[A-Za-z0-9._-]+$"}, "uniqueItems": true},
+    "method": {"type": "string"},
+    "subject": {"type": "string", "minLength": 1},
+    "input_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "snapshot_fingerprint": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "environment": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}},
+    "executed_at": {"type": ["string", "null"], "format": "date-time"},
+    "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "invalidated_by": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "extensions": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "passed"}}},
+      "then": {
+        "properties": {
+          "method": {"minLength": 1},
+          "snapshot_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "executed_at": {"type": "string", "format": "date-time"},
+          "evidence_refs": {"minItems": 1}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

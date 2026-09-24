@@ -174,8 +174,8 @@ def test_select_candidates_logic():
         a_recent = Article(url="https://example.com/recent", title="Recent Product", body="", images=["data/media/post_10_050b9f4d.jpg"], product_line="Nutrilite")
         a_failed = Article(url="https://example.com/failed", title="Failed Product", body="", images=[], product_line="Nutrilite")
 
-        # Mark old (25 days ago) and recent (2 days ago)
-        storage._data.append({"hash": Storage._hash_url(a_old.url), "url": a_old.url, "published_at": (now - timedelta(days=25)).isoformat()})
+        # Mark old (120 days ago, > 90 days cooldown) and recent (2 days ago)
+        storage._data.append({"hash": Storage._hash_url(a_old.url), "url": a_old.url, "published_at": (now - timedelta(days=120)).isoformat()})
         storage._data.append({"hash": Storage._hash_url(a_recent.url), "url": a_recent.url, "published_at": (now - timedelta(days=2)).isoformat()})
         storage._save()
 
@@ -188,13 +188,13 @@ def test_select_candidates_logic():
         assert pool1[0].url == a_fresh.url
 
         # Scenario 2: Fresh candidate exists and pool_size=4 -> picks fresh first, then supplements with eligible evergreen (a_old)
-        # a_recent is skipped (< 14 days), a_failed is skipped (attempted)
+        # a_recent is skipped (< 90 days), a_failed is skipped (attempted)
         pool2 = select_candidates([a_fresh, a_old, a_recent, a_failed], storage, attempts, pool_size=4)
         assert len(pool2) == 2
         assert pool2[0].url == a_fresh.url
         assert pool2[1].url == a_old.url
 
-        # Scenario 3: No fresh candidates -> must recycle eligible old candidate (published > 14 days ago)
+        # Scenario 3: No fresh candidates -> must recycle eligible old candidate (published > 90 days ago)
         pool3 = select_candidates([a_old, a_recent, a_failed], storage, attempts, pool_size=4)
         assert len(pool3) == 1
         assert pool3[0].url == a_old.url
@@ -303,5 +303,63 @@ async def test_publish_prepared_queue_rollback(monkeypatch):
         reloaded_prep = PreparedStorage(prep_file)
         assert reloaded_prep.count() == 1
         assert reloaded_prep._data[0]["url"] == "https://example.com/item1"
+
+
+def test_storage_sku_and_url_normalization_deduplication():
+    import tempfile
+    from src.storage import Storage
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = os.path.join(tmpdir, "test_sku_dedup.json")
+        s = Storage(test_file)
+
+        # 1. Mark product published with SKU 126725
+        url_a = "https://www.amway.ua/artistry-future-glow-tonalna-osnova-syrovatka-dlia-oblychchia-z-spf-35-pa/p/126725"
+        s.mark_published(url=url_a, title="Artistry Future Glow Тональна основа-сироватка")
+
+        # 2. Check duplicate with /uk/ prefix and query params -> MUST detect as published
+        url_b = "https://www.amway.ua/uk/artistry-future-glow-tonalna-osnova-syrovatka-dlia-oblychchia-z-spf-35-pa/p/126725?tab=reviews"
+        assert s.is_published(url_b) is True
+
+        # 3. Check duplicate with different URL slug but same SKU -> MUST detect as published
+        url_c = "https://www.amway.ua/uk/product-alias/p/126725"
+        assert s.is_published(url_c) is True
+
+        # 4. Check duplicate with different URL but explicitly passed SKU -> MUST detect as published
+        url_d = "https://www.amway.ua/uk/product/custom-slug"
+        assert s.is_published(url_d, sku="126725") is True
+
+        # 5. Check duplicate by matching normalized title
+        assert s.is_published("https://www.amway.ua/completely-different-url", title="Artistry Future Glow Тональна основа-сироватка — купить в интернет-магазине Amway") is True
+
+        # 6. Completely new product -> False
+        url_fresh = "https://www.amway.ua/nutrilite-brand-new/p/999999"
+        assert s.is_published(url_fresh) is False
+
+
+def test_evergreen_disabled_when_cooldown_zero():
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+    from src.storage import Storage
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = os.path.join(tmpdir, "test_cooldown_zero.json")
+        s = Storage(test_file)
+
+        now = datetime.now(timezone.utc)
+        url_ancient = "https://www.amway.ua/ancient/p/111"
+        s._data.append({
+            "hash": Storage._hash_url(url_ancient),
+            "url": url_ancient,
+            "sku": "111",
+            "title": "Ancient Product",
+            "published_at": (now - timedelta(days=500)).isoformat(),
+        })
+        s._save()
+
+        # Cooldown 0 or negative -> evergreen disabled, stays published (True)
+        assert s.is_published(url_ancient, cooldown_days=0) is True
+        assert s.is_published(url_ancient, cooldown_days=-1) is True
+
 
 

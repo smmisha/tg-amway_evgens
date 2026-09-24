@@ -5,7 +5,7 @@
 
 ## Возможности
 
-- 🕷️ **Парсинг** amway.ua через Playwright (headless Chromium)
+- 🕷️ **Парсинг** amway.ua через Scrapling + S3 XML Sitemaps (быстро, без блокировок DataDome)
 - 🧠 **Перефразирование** через Gemini (primary) с Groq fallback
 - 👁️ **Визуальная проверка** — Gemini «глазами» сверяет текст поста и картинку до публикации
 - 📚 **Обогащение** постов через базу из 40 книг по психологии и маркетингу
@@ -27,7 +27,6 @@ cd Coworker
 
 ```bash
 pip install -r requirements.txt
-playwright install chromium
 ```
 
 ### 3. Настройка
@@ -69,7 +68,7 @@ python -m src.main --dry-run
 ```
 src/
 ├── main.py            — Оркестратор (точка входа)
-├── scraper.py         — Парсер amway.ua (Playwright)
+├── scraper.py         — Парсер amway.ua (Scrapling + S3 Sitemap)
 ├── rewriter.py        — LLM перефразирование (Gemini → Groq)
 ├── humanizer.py       — Anti-AI валидация (из voice.js)
 ├── book_enricher.py   — Обогащение через книги

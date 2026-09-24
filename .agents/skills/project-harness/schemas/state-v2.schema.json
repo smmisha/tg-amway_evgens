@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-harness.dev/schema/state-v2.schema.json",
+  "title": "Project Harness current state v2",
+  "type": "object",
+  "required": ["schema_version", "skill_version", "project_id", "revision", "updated_at", "depth", "stage", "result_status", "capabilities", "scope", "requirements", "decisions", "tasks", "checks", "operations", "sources", "risks", "permissions", "blockers", "next_action"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "skill_version": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string", "pattern": "^PROJECT-[A-Za-z0-9._-]+$"},
+    "revision": {"type": "integer", "minimum": 0},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "depth": {"enum": ["compact", "managed"]},
+    "stage": {"enum": ["sketch_clarify", "spec", "design", "roadmap_tasks", "implementation", "verification", "handover_launch"]},
+    "result_status": {"enum": ["in_progress", "blocked", "implemented", "locally_verified", "ready_for_review", "ready_for_release", "released", "externally_accepted"]},
+    "capabilities": {"type": "object", "additionalProperties": {"enum": ["unknown", "available", "unavailable"]}},
+    "scope": {
+      "type": "object",
+      "required": ["outcome", "exclusions", "artifact_refs"],
+      "properties": {
+        "outcome": {"type": "string"},
+        "exclusions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "artifact_refs": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "requirements": {"$ref": "#/$defs/activeCollection"},
+    "decisions": {"$ref": "#/$defs/activeCollection"},
+    "tasks": {"$ref": "#/$defs/activeCollection"},
+    "checks": {
+      "type": "object",
+      "required": ["current"],
+      "properties": {"current": {"type": "array", "items": {"$ref": "check-v2.schema.json"}}},
+      "additionalProperties": false
+    },
+    "operations": {"$ref": "#/$defs/openCollection"},
+    "sources": {"$ref": "#/$defs/activeCollection"},
+    "risks": {"$ref": "#/$defs/activeCollection"},
+    "permissions": {"$ref": "#/$defs/activeCollection"},
+    "blockers": {"$ref": "#/$defs/activeCollection"},
+    "next_action": {"type": "string"},
+    "extensions": {"type": "object"},
+    "legacy": {"type": "object"}
+  },
+  "$defs": {
+    "activeCollection": {
+      "type": "object",
+      "required": ["active"],
+      "properties": {"active": {"type": "array", "items": {"type": "object"}}},
+      "additionalProperties": false
+    },
+    "openCollection": {
+      "type": "object",
+      "required": ["open"],
+      "properties": {"open": {"type": "array", "items": {"type": "object"}}},
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

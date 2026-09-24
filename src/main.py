@@ -87,22 +87,25 @@ def select_candidates(
     """
     fresh = [
         a for a in articles
-        if not storage.is_published(a.url) and not attempts.is_attempted(a.url)
+        if not storage.is_published(a.url, sku=getattr(a, "sku", None), title=getattr(a, "title", None))
+        and not attempts.is_attempted(a.url, sku=getattr(a, "sku", None))
     ]
     candidates = list(fresh[:pool_size])
 
-    if len(candidates) < pool_size:
-        already_selected = {c.url for c in candidates}
+    if len(candidates) < pool_size and PUBLISHED_COOLDOWN_DAYS > 0:
+        already_selected_urls = {c.url for c in candidates}
+        already_selected_skus = {getattr(c, "sku", None) for c in candidates if getattr(c, "sku", None)}
         recycled = [
             a for a in articles
-            if a.url not in already_selected
-            and storage.is_published(a.url)
-            and not storage.is_published(a.url, cooldown_days=PUBLISHED_COOLDOWN_DAYS)
-            and not attempts.is_attempted(a.url)
+            if a.url not in already_selected_urls
+            and (not getattr(a, "sku", None) or getattr(a, "sku", None) not in already_selected_skus)
+            and storage.is_published(a.url, sku=getattr(a, "sku", None), title=getattr(a, "title", None))
+            and not storage.is_published(a.url, sku=getattr(a, "sku", None), title=getattr(a, "title", None), cooldown_days=PUBLISHED_COOLDOWN_DAYS)
+            and not attempts.is_attempted(a.url, sku=getattr(a, "sku", None))
         ]
         if recycled:
             recycled.sort(
-                key=lambda a: storage.get_last_published_at(a.url) or datetime.min.replace(tzinfo=timezone.utc)
+                key=lambda a: storage.get_last_published_at(a.url, sku=getattr(a, "sku", None), title=getattr(a, "title", None)) or datetime.min.replace(tzinfo=timezone.utc)
             )
             needed = pool_size - len(candidates)
             candidates.extend(recycled[:needed])
@@ -289,6 +292,7 @@ async def run(dry_run: bool = False):
                 storage.mark_published(
                     url=article.url,
                     title=article.title,
+                    sku=getattr(article, "sku", "") or "",
                     telegram_message_id=message_id or "",
                 )
             published_count += 1
@@ -399,6 +403,7 @@ async def prepare_article_draft(article: Article, attempts: AttemptStorage) -> d
 
         return {
             "url": article.url,
+            "sku": getattr(article, "sku", "") or "",
             "title": article.title,
             "text": post_text,
             "image_url": original_image_url,
@@ -504,6 +509,7 @@ async def run_publish_prepared(dry_run: bool = False):
     image_url = post_draft.get("image_url", "")
     product_line = post_draft.get("product_line", "default")
     url = post_draft.get("url", "")
+    sku = post_draft.get("sku") or Storage.extract_sku(url) or ""
     title = post_draft.get("title", "")
 
     image_path = post_draft.get("image_path")
@@ -520,7 +526,7 @@ async def run_publish_prepared(dry_run: bool = False):
             message_id = await publish_post(text=text, image_path=image_path, use_html=False)
             if not message_id:
                 raise RuntimeError("publish_post returned no message_id")
-            storage.mark_published(url=url, title=title, telegram_message_id=message_id)
+            storage.mark_published(url=url, title=title, sku=sku, telegram_message_id=message_id)
 
         logger.info(f"Successfully published prepared post (Message ID: {message_id})")
     except Exception:

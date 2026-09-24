@@ -1,28 +1,23 @@
 """Scraper for amway.ua articles and product pages.
 
-The site is protected by DataDome anti-bot (JS challenge + fingerprinting).
-Headless Chromium, TLS impersonation and HTTP clients all get 403. The only
-working approach is a REAL browser in headful (visible) mode:
-
-- channel="chrome" (or "msedge") instead of Playwright's bundled Chromium
-- headless=False (DataDome blocks even new headless mode)
-- persistent context (user data dir) so the DataDome cookie survives restarts
-- --disable-blink-features=AutomationControlled + navigator.webdriver spoof
-- adaptive wait: the JS challenge resolves after ~10-25 s
-
-Product images live on an S3 CDN (amstack-eu-...s3-eu-central-1.amazonaws.com)
-and are NOT on the amway.ua domain, so the old `img[src*='amway']` selector
-missed them. We now read `meta[property='og:image']` first, then fall back to
-`img` tags. robots.txt: 1 request / 10 s.
+Uses Scrapling + TLS impersonation (curl_cffi with Chrome 124 fingerprint)
+to discover and fetch products directly from Amway's official S3 XML sitemaps
+and product pages. This completely bypasses DataDome anti-bot challenges and
+eliminates the need for heavy, error-prone browser automation in CI.
 """
 
 import asyncio
 import json
 import logging
 import os
+import random
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from curl_cffi import requests as cffi_requests
+from scrapling import Selector
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +44,19 @@ class Article:
 
 
 def detect_product_line(text: str) -> str:
-    """Detect Amway product line from text content."""
+    """Detect Amway product line from text content (supports UA & RU keywords)."""
     text_lower = text.lower()
     # Check for XS product line (use word boundary for 'xs' to avoid matching 'express', 'pixels', etc.)
-    if re.search(r"\bxs\b", text_lower) or any(kw in text_lower for kw in ["энергетик", "xs power", "xs™"]):
+    if re.search(r"\bxs\b", text_lower) or any(kw in text_lower for kw in ["енергетик", "энергетик", "xs power", "xs™", "енергетичн"]):
         return "XS"
-    if any(kw in text_lower for kw in ["nutrilite", "нутрилайт", "витамин", "omega", "омега", "протеин"]):
+    if any(kw in text_lower for kw in ["nutrilite", "нутрилайт", "нутрылайт", "вітамін", "витамин", "omega", "омега", "протеин", "протеїн", "дієтичн"]):
         return "Nutrilite"
-    if any(kw in text_lower for kw in ["artistry", "артистри", "косметик", "крем", "сыворотк", "уход за кож"]):
+    if any(kw in text_lower for kw in ["artistry", "артистри", "артистрі", "косметик", "крем", "сыворотк", "сироватк", "уход за кож", "догляд за шкір"]):
         return "Artistry"
-    if any(kw in text_lower for kw in ["amway home", " чистящ", " моющ", "стирк", "средство для"]) or re.search(r"\bloc\b", text_lower):
+    if any(kw in text_lower for kw in ["amway home", "чистящ", "миюч", "моющ", "стирк", "пранн", "засіб для", "средство для", "sa8", "dish drops", "scrub buds"]) or re.search(r"\bloc\b", text_lower):
         return "Home Care"
+    if any(kw in text_lower for kw in ["glister", "g&h", "satinique", "зубн", "паст", "шампун"]):
+        return "Personal Care"
     return "default"
 
 
@@ -72,363 +69,150 @@ def _clean_image_url(url: str) -> str:
     return url
 
 
-def _is_article_like(href: str) -> bool:
-    h = href.lower()
-    return (
-        (h.startswith("http") and ("/p/" in h or "/c/" in h))
-        and "cart" not in h
-        and "login" not in h
-        and "user" not in h
-    )
-
-
-async def _launch_browser(p, profile_dir: str):
-    """Launch real headful Chrome/Edge with a persistent profile and stealth options."""
-    from config import settings
-
-    channels = settings.CHROME_CHANNELS
-    last_err = None
-    extra_args = [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-infobars",
-        "--window-position=0,0",
-        "--ignore-certificate-errors",
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    ]
-    for channel in channels:
-        try:
-            context = await p.chromium.launch_persistent_context(
-                profile_dir,
-                headless=False,
-                channel=channel,
-                viewport={"width": 1280, "height": 900},
-                locale="uk-UA",
-                args=extra_args,
-            )
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['uk-UA', 'uk', 'ru-RU', 'ru', 'en-US', 'en']});
-                window.chrome = { runtime: {} };
-            """)
-            logger.info(f"Browser launched (channel={channel}, headful, profile={profile_dir})")
-            return context
-        except Exception as e:
-            last_err = e
-            logger.warning(f"Failed to launch channel={channel}: {e}")
-    raise last_err
-
-
-FALLBACK_PRODUCT_URLS = [
-    "https://www.amway.ua/uk/p/100035",
-    "https://www.amway.ua/uk/p/121608",
-    "https://www.amway.ua/uk/p/118492",
-    "https://www.amway.ua/uk/p/100344",
-    "https://www.amway.ua/uk/p/301889",
-    "https://www.amway.ua/uk/p/117842",
-    "https://www.amway.ua/uk/p/109852",
-    "https://www.amway.ua/uk/p/125300",
-    "https://www.amway.ua/uk/p/110486",
-    "https://www.amway.ua/uk/p/294240",
-    "https://www.amway.ua/uk/p/305547",
-    "https://www.amway.ua/uk/p/100749",
-    "https://www.amway.ua/uk/p/110488",
-    "https://www.amway.ua/uk/p/120484",
-]
-
-
-async def _wait_until_ready(page, min_links: int, timeout_ms: int) -> None:
-    """Wait for DataDome's JS challenge to resolve or content to appear."""
-    loop = asyncio.get_running_loop()
-    # Cap timeout at 8s so category scanning doesn't block for minutes
-    effective_timeout = min(timeout_ms, 8000)
-    deadline = loop.time() + effective_timeout / 1000
-    while loop.time() < deadline:
-        try:
-            await page.mouse.wheel(0, 300)
-        except Exception:
-            pass
-        count = await page.eval_on_selector_all(
-            "a[href]", "els => els.filter(el => el.href).length"
-        )
-        if count >= min_links:
-            return
-        await page.wait_for_timeout(1000)
-
-
-async def _collect_links(page, url: str, timeout_ms: int) -> list[str]:
-    """Open a page and return deduplicated article-like links."""
-    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    await _wait_until_ready(page, min_links=1, timeout_ms=timeout_ms)
-
-    links = await page.eval_on_selector_all(
-        "a[href]",
-        "els => els.map(el => el.href)"
-    )
-    seen = set()
-    result = []
-    for href in links:
-        if _is_article_like(href) and href not in seen:
-            seen.add(href)
-            result.append(href)
-    return result
-
-
-async def _extract_images(page) -> list[str]:
-    """Extract product images: og:image first, then img tags."""
-    images = []
-
-    og_images = await page.eval_on_selector_all(
-        "meta[property='og:image']",
-        "els => els.map(el => el.content || '')"
-    )
-    for src in og_images:
-        src = _clean_image_url(src)
-        if src.startswith("http"):
-            images.append(src)
-
-    if not images:
-        img_tags = await page.eval_on_selector_all(
-            "img[src]",
-            """els => els.map(el => el.currentSrc || el.src || '')
-                 .filter(s => s && s.startsWith('http') &&
-                         !s.includes('logo') && !s.includes('icon'))"""
-        )
-        for src in img_tags:
-            src = _clean_image_url(src)
-            if src.startswith("http"):
-                images.append(src)
-
-    seen = set()
-    unique = []
-    for src in images:
-        if src not in seen:
-            seen.add(src)
-            unique.append(src)
-    return unique[:5]
-
-
-async def _extract_body(page) -> str:
-    """Extract product description text.
-
-    Product pages render the description inside JS tabs (Огляд/Опис/Склад).
-    We click each tab and read the .tabbody panel, keeping the longest text.
-    Falls back to common content selectors, then to meta description.
-    """
-    body = ""
-    tab_loc = page.locator("a, button, [role='tab'], .tab-title")
-    tab_count = await tab_loc.count()
-    longest = ""
-    for i in range(tab_count):
-        try:
-            if not await tab_loc.nth(i).is_visible():
-                continue
-            txt = (await tab_loc.nth(i).inner_text() or "").strip()
-        except Exception:
-            continue
-        if not re.search(r"^(огляд|опис|склад|характеристики|застосування)", txt, re.I) or len(txt) > 60:
-            continue
-        try:
-            await tab_loc.nth(i).click(timeout=3000)
-            await page.wait_for_timeout(1500)
-            panels = page.locator(".tabbody")
-            panel_count = await panels.count()
-            for j in range(panel_count):
-                try:
-                    panel_text = (await panels.nth(j).inner_text()).strip()
-                except Exception:
-                    continue
-                if len(panel_text) > len(longest):
-                    longest = panel_text
-        except Exception:
-            continue
-
-    if len(longest) > 100:
-        body = longest
-
-    if len(body) < 100:
-        for selector in ["article", ".content-body", ".product-description",
-                         "[class*='content']", "main", ".page-content"]:
-            try:
-                el = await page.query_selector(selector)
-                if el:
-                    body = await el.inner_text()
-                    if len(body) > 100:
-                        break
-            except Exception:
-                continue
-
-    if not body or len(body) < 50:
-        meta_desc = await page.eval_on_selector_all(
-            "meta[name='description']",
-            "els => els.map(el => el.content || '')"
-        )
-        if meta_desc and meta_desc[0]:
-            body = meta_desc[0]
-
-    return body.strip()
-
-
-async def scrape_amway(sections: list[str], base_url: str = "https://www.amway.ua",
-                       delay: int = 10, max_articles: int = 5) -> list[Article]:
-    """Scrape product pages from amway.ua using real headful Chrome.
-
-    Strategy: collect category (/c/) links on section pages, then product
-    (/p/) links on category pages, then extract title/body/images from
-    product pages.
-
-    Args:
-        sections: URL paths to scrape (e.g., ["/uk/", "/uk/c/health"])
-        base_url: Base URL of the site
-        delay: Delay between requests in seconds (robots.txt says 10s)
-        max_articles: Maximum number of articles to return
-    """
-    from playwright.async_api import async_playwright
-    from config import settings
-
-    articles = []
-    profile_dir = settings.CHROME_PROFILE_DIR
-    wait_timeout = settings.SCRAPE_WAIT_TIMEOUT_MS
-    os.makedirs(profile_dir, exist_ok=True)
-
+def _fetch_sitemap_product_urls() -> list[str]:
+    """Fetch all product URLs from amway.ua XML sitemaps via S3."""
     try:
-        async with async_playwright() as p:
-            context = await _launch_browser(p, profile_dir)
-            await context.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-            )
-            page = context.pages[0] if context.pages else await context.new_page()
+        r = cffi_requests.get("https://www.amway.ua/sitemap.xml", impersonate="chrome124", timeout=15)
+        if r.status_code != 200:
+            logger.warning(f"Sitemap index returned status {r.status_code}")
+            return []
+        root = ET.fromstring(r.content)
+        sitemap_locs = [elem.text for elem in root.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc") if elem.text]
+        product_sitemaps = [u for u in sitemap_locs if "Product-" in u]
+        if not product_sitemaps:
+            logger.warning("No Product sitemaps found in sitemap index")
+            return []
 
-            for section_path in sections:
-                if len(articles) >= max_articles:
-                    break
+        all_products: list[str] = []
+        for sm_url in product_sitemaps:
+            try:
+                r_prod = cffi_requests.get(sm_url, impersonate="chrome124", timeout=20)
+                if r_prod.status_code == 200:
+                    root_prod = ET.fromstring(r_prod.content)
+                    urls = [elem.text for elem in root_prod.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc") if elem.text]
+                    all_products.extend(urls)
+            except Exception as e:
+                logger.warning(f"Failed to fetch sub-sitemap {sm_url}: {e}")
+                continue
 
-                url = f"{base_url}{section_path}"
-                logger.info(f"Scraping section: {url}")
-
-                try:
-                    links = await _collect_links(page, url, wait_timeout)
-                    product_links = [l for l in links if "/p/" in l.lower()]
-                    category_links = [l for l in links if "/c/" in l.lower()]
-
-                    logger.info(
-                        f"Found {len(product_links)} product links, "
-                        f"{len(category_links)} category links in {section_path}"
-                    )
-
-                    # Discover /p/ links from category pages
-                    if category_links:
-                        for cat_url in category_links[:3]:
-                            if len(articles) >= max_articles:
-                                break
-                            try:
-                                await asyncio.sleep(delay)
-                                cat_links = await _collect_links(page, cat_url, wait_timeout)
-                                for l in cat_links:
-                                    if "/p/" in l.lower() and l not in product_links:
-                                        product_links.append(l)
-                                logger.info(f"Category {cat_url}: +{len(product_links)} product links so far")
-                            except Exception as e:
-                                logger.warning(f"Failed to scan category {cat_url}: {e}")
-                                continue
-
-                    # Scrape product pages
-                    for product_url in product_links[:max_articles - len(articles)]:
-                        try:
-                            await asyncio.sleep(delay)
-                            await page.goto(product_url, wait_until="domcontentloaded", timeout=40000)
-                            await _wait_until_ready(page, min_links=1, timeout_ms=wait_timeout)
-
-                            title = await page.title()
-                            title = re.sub(r"\s*[|\-–—]\s*Amway.*$", "", title).strip()
-                            if not title:
-                                title = product_url.rsplit("/", 1)[-1]
-
-                            body = await _extract_body(page)
-
-                            images = await _extract_images(page)
-
-                            if title and (body or images):
-                                body = re.sub(r"\n{3,}", "\n\n", body)
-                                body = body[:5000]
-
-                                article = Article(
-                                    url=product_url,
-                                    title=title,
-                                    body=body,
-                                    images=images,
-                                    category=section_path.split("/")[-1],
-                                    product_line=detect_product_line(f"{title} {body}"),
-                                )
-                                articles.append(article)
-                                logger.info(
-                                    f"Scraped: {title} [{article.product_line}] "
-                                    f"({len(images)} images)"
-                                )
-
-                        except Exception as e:
-                            logger.warning(f"Failed to scrape product {product_url}: {e}")
-                            continue
-
-                except Exception as e:
-                    logger.warning(f"Failed to scrape section {url}: {e}")
-                    continue
-
-            # Fallback to direct product URLs if section discovery yielded too few articles
-            if len(articles) < max_articles:
-                logger.info(f"Scraped {len(articles)} articles so far. Checking fallback product URLs...")
-                scraped_urls = {a.url for a in articles}
-                for product_url in FALLBACK_PRODUCT_URLS:
-                    if len(articles) >= max_articles:
-                        break
-                    if product_url in scraped_urls:
-                        continue
-                    try:
-                        await asyncio.sleep(delay)
-                        await page.goto(product_url, wait_until="domcontentloaded", timeout=40000)
-                        await _wait_until_ready(page, min_links=1, timeout_ms=wait_timeout)
-
-                        title = await page.title()
-                        title = re.sub(r"\s*[|\-–—]\s*Amway.*$", "", title).strip()
-                        if not title:
-                            title = product_url.rsplit("/", 1)[-1]
-
-                        body = await _extract_body(page)
-                        images = await _extract_images(page)
-
-                        if title and (body or images):
-                            body = re.sub(r"\n{3,}", "\n\n", body)
-                            body = body[:5000]
-
-                            article = Article(
-                                url=product_url,
-                                title=title,
-                                body=body,
-                                images=images,
-                                category="fallback",
-                                product_line=detect_product_line(f"{title} {body}"),
-                            )
-                            articles.append(article)
-                            scraped_urls.add(product_url)
-                            logger.info(
-                                f"Scraped (fallback): {title} [{article.product_line}] "
-                                f"({len(images)} images)"
-                            )
-                    except Exception as e:
-                        logger.warning(f"Failed to scrape fallback product {product_url}: {e}")
-                        continue
-
-            await context.close()
-
+        logger.info(f"Discovered {len(all_products)} product URLs from Amway XML sitemaps.")
+        return all_products
     except Exception as e:
-        logger.error(f"Playwright error: {e}")
+        logger.warning(f"Failed to fetch sitemap: {e}")
+        return []
 
-    # Fallback to rich products catalog if live scraping yielded fewer articles than max_articles
+
+def _scrape_product_page(url: str) -> Article | None:
+    """Scrape and parse a single product page using Scrapling and TLS impersonation."""
+    try:
+        r = cffi_requests.get(url, impersonate="chrome124", timeout=15)
+        if r.status_code != 200 or not r.text:
+            logger.warning(f"Failed to fetch {url}: status {r.status_code}")
+            return None
+
+        html_text = r.content.decode("utf-8", errors="replace")
+        page = Selector(html_text)
+        raw_title = page.css("title::text").get() or ""
+        title = re.sub(r"\s*[|\-–—]\s*.*Amway.*$", "", raw_title, flags=re.IGNORECASE).strip()
+        if not title:
+            title = re.sub(r"\s*[|\-–—]\s*.*$", "", raw_title).strip()
+        if not title:
+            title = url.rsplit("/", 1)[-1]
+
+        # Extract images
+        images = []
+        og_img = page.css("meta[property='og:image']::attr(content)").get()
+        if og_img:
+            cleaned = _clean_image_url(og_img)
+            if cleaned.startswith("http"):
+                images.append(cleaned)
+
+        # Extract description / body
+        body = page.css("meta[name='description']::attr(content)").get() or ""
+        if not body:
+            paragraphs = page.css("p::text").getall()
+            if paragraphs:
+                body = " ".join([p.strip() for p in paragraphs if len(p.strip()) > 30])
+
+        if not images and not body:
+            return None
+
+        sku = ""
+        m = re.search(r"/p/(\d+)", url)
+        if m:
+            sku = m.group(1)
+
+        product_line = detect_product_line(f"{title} {body}")
+
+        return Article(
+            url=url,
+            title=title,
+            body=body[:5000],
+            images=images,
+            category=product_line.lower(),
+            product_line=product_line,
+            sku=sku,
+        )
+    except Exception as e:
+        logger.warning(f"Error scraping product page {url}: {e}")
+        return None
+
+
+async def scrape_amway(
+    sections: list[str] | None = None,
+    base_url: str = "https://www.amway.ua",
+    delay: int = 10,
+    max_articles: int = 8,
+) -> list[Article]:
+    """Scrape articles/products from amway.ua.
+
+    Primary engine: Scrapling + S3 XML Sitemaps (800+ products, zero DataDome challenge).
+    Fallback: data/products_catalog.json.
+    """
+    logger.info("Scraping amway.ua using Scrapling & S3 Sitemap engine...")
+    articles: list[Article] = []
+    scraped_urls: set[str] = set()
+
+    # 1. Fetch products from sitemaps
+    product_urls = _fetch_sitemap_product_urls()
+    if product_urls:
+        # Shuffle to discover varied products across runs
+        # Use day of year as seed for consistent daily candidate pool rotation
+        now = datetime.now(timezone.utc)
+        random.seed(now.strftime("%Y%m%d%H"))
+        sample_pool = list(product_urls)
+        random.shuffle(sample_pool)
+
+        # Load published storage to prioritize completely fresh URLs
+        try:
+            from config.settings import PUBLISHED_JSON, ATTEMPTED_JSON
+            from src.storage import Storage, AttemptStorage
+            storage = Storage(PUBLISHED_JSON)
+            attempts = AttemptStorage(ATTEMPTED_JSON)
+
+            fresh_candidates = [
+                u for u in sample_pool
+                if not storage.is_published(u) and not attempts.is_attempted(u)
+            ]
+            candidates = fresh_candidates if fresh_candidates else sample_pool
+        except Exception as e:
+            logger.warning(f"Storage check error during scraping candidate selection: {e}")
+            candidates = sample_pool
+
+        for p_url in candidates:
+            if len(articles) >= max_articles:
+                break
+            art = _scrape_product_page(p_url)
+            if art and art.images and art.title:
+                articles.append(art)
+                scraped_urls.add(art.url)
+                logger.info(f"Scraped via Scrapling: {art.title} [{art.product_line}] (SKU: {art.sku})")
+            if delay > 0 and len(articles) < max_articles:
+                await asyncio.sleep(min(delay, 2))  # courteous small delay
+
+    # 2. Fallback to products_catalog.json if live scraping yielded fewer than max_articles
     if len(articles) < max_articles:
         logger.info(f"Scraped {len(articles)} live articles. Loading product catalog fallback...")
-        scraped_urls = {a.url for a in articles}
         catalog_file = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "products_catalog.json"
         )

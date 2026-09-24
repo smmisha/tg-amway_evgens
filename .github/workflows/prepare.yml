@@ -36,18 +36,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Install Playwright browsers & dependencies
-        run: playwright install chromium --with-deps
-
-      - name: Install Google Chrome Stable & Xvfb
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget xvfb
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable || true
-
       - name: Prepare post draft (with 3 retries)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -61,7 +49,7 @@ jobs:
           until [ "$n" -ge 3 ]
           do
              echo "Attempt $((n+1)) of 3..."
-             xvfb-run -a python -m src.main --prepare && break
+             python -m src.main --prepare && break
              n=$((n+1))
              sleep 15
           done
