@@ -3,8 +3,10 @@
 Supports: text-only, photo + caption, and media groups.
 """
 
+import html
 import logging
 import os
+import re
 
 from telegram import Bot, InputMediaPhoto
 from telegram.constants import ParseMode
@@ -15,6 +17,7 @@ from config.settings import (
     TELEGRAM_ADMIN_CHAT_ID,
     TELEGRAM_CHAT_ID,
 )
+from src.output_guard import enforce_publication_policy
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,23 @@ def _truncate_preserving_tail(text: str, max_len: int = 1000) -> str:
     return body
 
 
+def _escape_for_parse_mode(text: str, use_html: bool) -> str:
+    """Экранировать текст под ParseMode.HTML.
+
+    SECURITY (F-02): HTML-режим интерпретирует любую последовательность «<...>» как
+    разметку. Текст поста приходит из статьи/LLM, поэтому экранируем его целиком —
+    иначе можно сломать отправку или внедрить разметку/ссылку.
+    """
+    return html.escape(text) if use_html else text
+
+
+def _clip_escaped(text: str, limit: int) -> str:
+    """Обрезать уже экранированный текст, не разрывая HTML-сущность (например ``&amp;``)."""
+    if len(text) <= limit:
+        return text
+    return re.sub(r"&[#A-Za-z0-9]{0,7}$", "", text[:limit])
+
+
 async def publish_post(
     text: str,
     image_path: str | None = None,
@@ -132,9 +152,10 @@ async def publish_post(
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     parse_mode = ParseMode.HTML if use_html else None
 
-    # For HTML mode, we don't need to escape text heavily — just avoid breaking tags
-    # The posts are plain text with emojis, so no HTML entities needed
-    post_text = text
+    # SECURITY (F-01): единая проверка исходящего текста — вырезаем HTML-теги, ссылки на
+    # неофициальные хосты и чужие @-упоминания (prompt injection из статьи). Если после
+    # очистки пусто — PublicationPolicyError, пост не публикуется.
+    post_text = enforce_publication_policy(text)
 
     try:
         final_text = post_text.strip()
@@ -144,10 +165,12 @@ async def publish_post(
         if image_path and os.path.exists(image_path):
             with open(image_path, "rb") as photo:
                 if len(final_text) <= 1000:
+                    # SECURITY (F-02): экранируем caption для HTML parse_mode.
+                    caption = _clip_escaped(_escape_for_parse_mode(final_text, use_html), 1024)
                     message = await bot.send_photo(
                         chat_id=target_chat,
                         photo=photo,
-                        caption=final_text,
+                        caption=caption,
                         parse_mode=parse_mode,
                     )
                     logger.info(f"Published photo post. Message ID: {message.message_id}")
@@ -156,19 +179,22 @@ async def publish_post(
                     # Extract the CTA/hashtag tail so it survives truncation
                     caption_text = _truncate_preserving_tail(final_text, max_len=1000)
 
+                    # SECURITY (F-02): экранируем caption для HTML parse_mode.
+                    caption = _clip_escaped(_escape_for_parse_mode(caption_text, use_html), 1024)
                     message = await bot.send_photo(
                         chat_id=target_chat,
                         photo=photo,
-                        caption=caption_text,
+                        caption=caption,
                         parse_mode=parse_mode,
                     )
                     logger.info(f"Published clean photo post ({len(caption_text)} chars). Message ID: {message.message_id}")
                     return str(message.message_id)
         else:
             # Send text-only message (Telegram limit 4096)
+            # SECURITY (F-02): экранируем текст для HTML parse_mode.
             message = await bot.send_message(
                 chat_id=target_chat,
-                text=final_text,
+                text=_clip_escaped(_escape_for_parse_mode(final_text, use_html), 4096),
                 parse_mode=parse_mode,
                 disable_web_page_preview=True,
             )
@@ -204,6 +230,10 @@ async def publish_media_group(
         return None
     _log_target(chat_id)
 
+    # SECURITY (F-01): та же проверка исходящего текста, что и в publish_post:
+    # caption уходит в канал, поэтому чистим его до форматирования.
+    caption_source = enforce_publication_policy(text)
+
     if not image_paths:
         return await publish_post(text)
 
@@ -217,9 +247,12 @@ async def publish_media_group(
             with open(path, "rb") as f:
                 photo_bytes = f.read()
             if i == 0:
+                # SECURITY (F-02): caption отправляется с ParseMode.HTML — экранируем
+                # текст, чтобы «<...>» из статьи не интерпретировалось как разметка.
+                caption = _clip_escaped(_escape_for_parse_mode(caption_source[:1024], True), 1024)
                 media.append(InputMediaPhoto(
                     media=photo_bytes,
-                    caption=text[:1024],
+                    caption=caption,
                     parse_mode=ParseMode.HTML,
                 ))
             else:

@@ -4,14 +4,19 @@ import hashlib
 import logging
 import os
 import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
+from src.net_safety import is_host_allowed, safe_get_bytes
 
 logger = logging.getLogger(__name__)
 
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB Telegram limit for photos
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+# SECURITY: локальные картинки разрешены только внутри <repo>/data/media (аудит F-05).
+BASE_DIR = Path(__file__).resolve().parent.parent
+MEDIA_DIR = BASE_DIR / "data" / "media"
 
 
 async def download_image(url: str, output_dir: str | None = None) -> str | None:
@@ -28,12 +33,28 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
     # Local file path (repo-relative or absolute) — no download needed
     if parsed.scheme not in ("http", "https"):
         local_path = os.path.normpath(url)
-        if os.path.exists(local_path) and os.path.isfile(local_path):
-            ext = os.path.splitext(local_path)[1].lower()
+        # SECURITY: локальная ветка принимает только файлы внутри <repo>/data/media —
+        # иначе "../.." или абсолютный путь читает произвольный файл и публикует его
+        # в канал (аудит F-05). realpath раскрывает symlink'и и "..".
+        real_path = os.path.realpath(local_path)
+        media_root = os.path.realpath(str(MEDIA_DIR))
+        try:
+            inside_media = (
+                os.path.commonpath([os.path.normcase(real_path), os.path.normcase(media_root)])
+                == os.path.normcase(media_root)
+            )
+        except ValueError:
+            # ValueError — пути на разных дисках (Windows): заведомо вне data/media.
+            inside_media = False
+        if not inside_media:
+            logger.warning(f"Refused local image outside data/media: {url}")
+            return None
+        if os.path.exists(real_path) and os.path.isfile(real_path):
+            ext = os.path.splitext(real_path)[1].lower()
             if ext not in ALLOWED_EXTENSIONS:
                 logger.warning(f"Unsupported local image extension: {local_path}")
                 return None
-            size = os.path.getsize(local_path)
+            size = os.path.getsize(real_path)
             if size > MAX_IMAGE_SIZE:
                 logger.warning(f"Local image too large ({size} bytes): {local_path}")
                 return None
@@ -55,26 +76,25 @@ async def download_image(url: str, output_dir: str | None = None) -> str | None:
         filename = f"image_{url_hash}{ext}"
         filepath = os.path.join(output_dir, filename)
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    )
-                },
-            )
-            resp.raise_for_status()
+        # SECURITY: SSRF-безопасная загрузка (аудит F-03): только http(s), отказ для
+        # приватных/loopback/link-local IP по DNS, ручные редиректы (макс. 3, с проверкой
+        # каждого хопа), лимит 10 МБ при потоковом чтении, без полной буферизации.
+        data, content_type, final_url = await safe_get_bytes(
+            url,
+            timeout=30.0,
+            max_bytes=MAX_IMAGE_SIZE,
+        )
 
-            if len(resp.content) > MAX_IMAGE_SIZE:
-                logger.warning(f"Image too large ({len(resp.content)} bytes): {url}")
-                return None
+        # SECURITY: принимаем только явный image/* Content-Type; если сервер его не отдал —
+        # кандидат пропускается с warning (аудит F-03).
+        if not content_type.startswith("image/"):
+            logger.warning(f"Skipping non-image Content-Type {content_type!r}: {url}")
+            return None
 
-            with open(filepath, "wb") as f:
-                f.write(resp.content)
+        with open(filepath, "wb") as f:
+            f.write(data)
 
-        logger.info(f"Downloaded image: {filepath} ({len(resp.content)} bytes)")
+        logger.info(f"Downloaded image: {filepath} ({len(data)} bytes) from {final_url}")
         return filepath
 
     except Exception as e:
@@ -189,15 +209,23 @@ OFFICIAL_IMAGE_DOMAINS = [
     "amway.ua",
     "amway.com",
     "amway.eu",
-    "amstack",
-    "s3-eu-central-1.amazonaws.com",
-    "amway-media",
+    # SECURITY: точный хост реально используемого S3-бакета Amway (см. src/scraper.py,
+    # tests/test_scraper.py). Общие подстроки "amstack"/"amway-media" удалены: они
+    # пропускали любой хост, содержащий эту подстроку (аудит F-03).
+    "amstack-eu-prod01.s3.amazonaws.com",
 ]
 
 def _is_official_image_url(url: str) -> bool:
-    """True if URL is from Amway official domain/CDN."""
-    u = (url or "").lower()
-    return any(d in u for d in OFFICIAL_IMAGE_DOMAINS)
+    """True if URL is from Amway official domain/CDN.
+
+    Сравнение по hostname, а не по подстроке: ``https://attacker.tld/x.jpg?ref=amway.ua``
+    официальным НЕ считается (аудит F-03). Совпадение точное или суффикс ".домен".
+    """
+    try:
+        host = (urlparse(url or "").hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return is_host_allowed(host, OFFICIAL_IMAGE_DOMAINS)
 
 
 async def autonomous_resolve_product_image(
