@@ -14,7 +14,7 @@ import httpx
 
 from config.settings import TELEGRAM_BOT_TOKEN
 from config.prompts import START_RESPONSE
-from src.log_safety import configure_safe_logging
+from src.log_safety import configure_safe_logging, mask_identifier
 
 # SECURITY (TG-F-09): токен бота передаётся в пути URL Bot API; INFO-логи httpx
 # писали его целиком. Гасим HTTP-логи и вырезаем секреты из сообщений.
@@ -95,13 +95,17 @@ async def process_updates():
             # All other user messages are ignored (no auto-replies).
             if chat_type == "private" and chat_id:
                 if text.strip() == "/start":
-                    logger.info(f"Replying to chat {chat_id}: /start")
+                    # TG-F-13: chat_id пользователя в логах не раскрываем.
+                    logger.info("Replying to chat %s: /start", mask_identifier(chat_id))
                     await client.post(
                         f"{base_url}/sendMessage",
                         json={"chat_id": chat_id, "text": START_RESPONSE},
                     )
                 else:
-                    logger.info(f"Ignoring non-/start message from chat {chat_id}")
+                    logger.info(
+                        "Ignoring non-/start message from chat %s",
+                        mask_identifier(chat_id),
+                    )
 
             # Track last processed update
             if update_id > last_id:

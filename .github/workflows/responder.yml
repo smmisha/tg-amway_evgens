@@ -10,6 +10,9 @@ jobs:
   respond:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # SECURITY (F-10): единственное write-право нужно шагу
+    # "Commit updated last_update_id" (git commit + push в main). Артефакты,
+    # issues, PR, packages и прочее не используются — набор уже минимальный.
     permissions:
       contents: write
 

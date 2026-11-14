@@ -17,6 +17,7 @@ from config.settings import (
     TELEGRAM_ADMIN_CHAT_ID,
     TELEGRAM_CHAT_ID,
 )
+from src.log_safety import mask_identifier
 from src.output_guard import enforce_publication_policy
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,11 @@ def _log_target(chat_id: str | None):
             source = "TELEGRAM_CHAT_ID (FALLBACK! GROUP/ADMIN not set)"
         else:
             source = "NOT SET"
-    logger.warning(f"Publish target chat_id={target!r} sourced from {source}")
+    # TG-F-13: полный chat_id в логи не пишем — только ***<3 цифры> (source
+    # остаётся видимым и однозначно объясняет выбор target).
+    logger.warning(
+        "Publish target chat_id=%s sourced from %s", mask_identifier(target), source
+    )
 
 
 def escape_markdown_v2(text: str) -> str:

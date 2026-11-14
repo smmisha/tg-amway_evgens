@@ -14,7 +14,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, filte
 
 from config.settings import TELEGRAM_BOT_TOKEN
 from config.prompts import START_RESPONSE
-from src.log_safety import configure_safe_logging
+from src.log_safety import configure_safe_logging, mask_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Второй слой защиты: даже если фильтр когда-нибудь снимут/изменят,
         # в группах и каналах бот не отвечает.
         logger.info(
+            # TG-F-13: chat_id в логах только в маскированном виде (***<3 цифры>).
             "Ignoring /start outside private chat (chat_id=%s type=%s)",
-            getattr(chat, "id", None),
+            mask_identifier(getattr(chat, "id", None)),
             getattr(chat, "type", None),
         )
         return

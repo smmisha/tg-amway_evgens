@@ -3,6 +3,12 @@ name: DataDome Probe — check amway.ua from runner IP
 on:
   workflow_dispatch: {}
 
+# SECURITY (F-10): явный минимальный набор прав вместо наследования дефолта
+# репозитория. Probe только читает репозиторий и ставит зависимости —
+# ни записи в contents, ни artifacts, ни прочих прав не требуется.
+permissions:
+  contents: read
+
 jobs:
   probe:
     runs-on: ubuntu-latest

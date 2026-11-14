@@ -10,6 +10,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # SECURITY (F-10): restore_state() (GET artifacts API) требует только
+    # actions: read, но шаг "Upload updated state" (actions/upload-artifact)
+    # требует actions: write — иначе 403 и state не сохраняется между запусками.
     permissions:
       contents: read
       actions: write

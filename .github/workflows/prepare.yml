@@ -12,6 +12,10 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # SECURITY (F-10): restore_state() в scripts/state_helpers.sh ходит в
+    # artifacts API только GET-запросами (actions: read), но шаг
+    # "Upload updated state" (actions/upload-artifact) — write: при понижении
+    # до actions: read сохранение state падает с 403. Других прав нет.
     permissions:
       contents: read
       actions: write
