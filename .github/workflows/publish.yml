@@ -32,7 +32,8 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # SECURITY (TG-F-08): только полностью зафиксированные зависимости с хэшами.
+        run: pip install --require-hashes -r requirements.lock
 
       - name: Publish post from prepared queue
         env:

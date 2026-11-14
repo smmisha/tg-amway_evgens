@@ -24,7 +24,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install httpx python-dotenv
+        # SECURITY (TG-F-08): отдельный минимальный lock (httpx + python-dotenv),
+        # чтобы каждые 5 минут не ставить playwright/scrapling. Пиннинг + хэши.
+        run: pip install --require-hashes -r requirements-responder.lock
 
       - name: Check and reply to messages
         env:

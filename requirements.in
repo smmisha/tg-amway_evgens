@@ -1,0 +1,16 @@
+# Direct runtime dependencies (human-maintained INPUT file).
+#
+# The machine-readable lock with SHA-256 hashes is generated from THIS file:
+#   python -m piptools compile requirements.in --generate-hashes \
+#       --output-file requirements.lock
+# Commit requirements.lock together with any change here. Never edit the lock
+# by hand. See docs/SUPPLY_CHAIN.md (TG-F-08).
+
+scrapling>=0.4.15
+curl_cffi>=0.11.0
+playwright>=1.44.0
+python-telegram-bot>=21.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+python-dotenv>=1.0.0

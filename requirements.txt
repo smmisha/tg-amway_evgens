@@ -1,3 +1,12 @@
+# SUPPLY (TG-F-08): этот файл — НЕ lock: здесь только нижние границы для людей.
+# Машиночитаемый lock с SHA-256-хэшами — requirements.lock, он генерируется из
+# requirements.in и именно из него ставит зависимости CI:
+#   python -m piptools compile requirements.in --generate-hashes --strip-extras \
+#       --output-file requirements.lock
+#   pip install --require-hashes -r requirements.lock
+# Не добавляйте пакет сюда, не добавив его в requirements.in и не
+# перегенерировав requirements.lock. Подробности: docs/SUPPLY_CHAIN.md.
+
 scrapling>=0.4.15
 curl_cffi>=0.11.0
 playwright>=1.44.0
@@ -6,4 +15,3 @@ httpx>=0.27.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 python-dotenv>=1.0.0
-

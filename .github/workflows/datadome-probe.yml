@@ -18,8 +18,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
+        # SECURITY (TG-F-08): пиннинг + хэши (playwright/httpx входят в общий lock).
         run: |
-          pip install playwright httpx
+          pip install --require-hashes -r requirements.lock
           python -m playwright install chromium --with-deps
 
       - name: Install Xvfb (headful display)

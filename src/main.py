@@ -222,6 +222,12 @@ async def run(dry_run: bool = False):
             logger.info(f"\n{post_text}\n")
 
             # ── Step 5.5: Gemini "eyes" — check image + text together ──────
+            # SECURITY (TG-F-06): the vision gate is FAIL-CLOSED. Anything other
+            # than an explicit approval (missing key, network/API error, non-JSON
+            # answer, every model failed, explicit mismatch, exception) means the
+            # image is NOT verified. In that case we drop the media and publish
+            # the generated text without a picture — never an unvetted image.
+            publish_image_path = image_path
             if image_path:
                 logger.info("[Step 5.5/7] Gemini visually checking image + text...")
                 try:
@@ -232,21 +238,19 @@ async def run(dry_run: bool = False):
                         post_text=post_text,
                     )
                 except Exception as e:
-                    logger.warning(f"Vision validation error: {e}. Proceeding without it.")
-                    vision_ok = True
+                    logger.error(
+                        f"Vision validation crashed: {e}. Fail-closed: dropping the image."
+                    )
+                    vision_ok = False
 
                 if not vision_ok:
                     logger.warning(
-                        "Gemini rejected the post (image/text mismatch). "
-                        "Marking candidate failed; trying the next one."
+                        "VISION GATE: image was rejected or could not be verified. "
+                        "Publishing the post as TEXT-ONLY (no unvetted media)."
                     )
-                    if not dry_run:
-                        attempts.mark_attempted(
-                            article.url, reason="gemini_vision_mismatch"
-                        )
-                    failures.append(f"{article.title} — gemini_vision_mismatch")
-                    continue
-                logger.info("Gemini approved the post (image + text match).")
+                    publish_image_path = None
+                else:
+                    logger.info("Gemini approved the post (image + text match).")
 
             # ── Step 6: Publish ──────────────────────────────────────────
             if dry_run:
@@ -260,7 +264,7 @@ async def run(dry_run: bool = False):
                     logger.info("[Step 6/7] Sending preview to executor (admin chat)...")
                     await publish_post(
                         text=post_text,
-                        image_path=image_path,
+                        image_path=publish_image_path,
                         use_html=False,  # Plain text — emojis don't need HTML
                         chat_id=TELEGRAM_ADMIN_CHAT_ID,
                     )
@@ -268,7 +272,7 @@ async def run(dry_run: bool = False):
                 try:
                     message_id = await publish_post(
                         text=post_text,
-                        image_path=image_path,
+                        image_path=publish_image_path,
                         use_html=False,  # Plain text — emojis don't need HTML
                     )
                 except Exception as e:
@@ -379,27 +383,34 @@ async def prepare_article_draft(article: Article, attempts: AttemptStorage) -> d
 
         post_text = await rewrite_article(article=article, book_context=book_context, image_path=image_path)
 
+        # SECURITY (TG-F-06): fail-closed vision gate. If the image is not
+        # explicitly approved, prepare a TEXT-ONLY draft (``no_media``) so that
+        # publish-prepared never re-attaches an unvetted picture.
         vision_ok = await validate_image_with_gemini_vision(
             image_path=image_path,
             topic_title=article.title,
             product_line=article.product_line,
             post_text=post_text,
         )
-        if not vision_ok:
-            logger.warning(f"Vision validation rejected {article.title}")
-            attempts.mark_attempted(article.url, reason="gemini_vision_mismatch")
+        media_dropped_by_vision_gate = not vision_ok
+        if media_dropped_by_vision_gate:
+            logger.warning(
+                f"VISION GATE: image for '{article.title}' was rejected or could not be "
+                "verified. Preparing a TEXT-ONLY draft (no media)."
+            )
             cleanup_temp_media(image_path)
-            return None
+            image_path = None
 
-        # Resolve image URL for persistence
+        # Resolve image URL for persistence (skipped for a text-only draft)
         original_image_url = ""
-        for img_url in article.images:
-            if img_url.startswith("http") or img_url.startswith("data/media/"):
-                original_image_url = img_url
-                break
-        if not original_image_url and image_path and os.path.exists(image_path):
-            if not os.path.basename(os.path.dirname(image_path)).startswith("amway_media_"):
-                original_image_url = image_path
+        if not media_dropped_by_vision_gate:
+            for img_url in article.images:
+                if img_url.startswith("http") or img_url.startswith("data/media/"):
+                    original_image_url = img_url
+                    break
+            if not original_image_url and image_path and os.path.exists(image_path):
+                if not os.path.basename(os.path.dirname(image_path)).startswith("amway_media_"):
+                    original_image_url = image_path
 
         return {
             "url": article.url,
@@ -409,6 +420,7 @@ async def prepare_article_draft(article: Article, attempts: AttemptStorage) -> d
             "image_url": original_image_url,
             "image_path": image_path,
             "product_line": article.product_line,
+            "no_media": media_dropped_by_vision_gate,
         }
     except Exception as e:
         logger.warning(f"Draft preparation failed for {article.title}: {e}")
@@ -513,7 +525,14 @@ async def run_publish_prepared(dry_run: bool = False):
     title = post_draft.get("title", "")
 
     image_path = post_draft.get("image_path")
-    if not image_path:
+    if post_draft.get("no_media"):
+        # SECURITY (TG-F-06): the draft was prepared with the vision gate failing
+        # closed. Never re-resolve/re-attach media here — publish text-only.
+        logger.warning(
+            "Draft is marked no_media (vision gate failed closed) — publishing text-only."
+        )
+        image_path = None
+    elif not image_path:
         candidate_urls = [image_url] if image_url else []
         image_path = await download_first_image(candidate_urls, product_line=product_line, title=title, url=url)
 

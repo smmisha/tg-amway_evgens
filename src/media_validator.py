@@ -2,6 +2,14 @@
 
 Inspects images before publishing to verify whether the image visually matches
 the specific product topic (e.g. Omega-3 vs skincare vs energy drink).
+
+SECURITY POLICY (TG-F-06): the vision gate is FAIL-CLOSED. ``True`` is returned
+only when a model explicitly answered with a well-formed approval. Everything
+else — no image, no API key, unreadable/undecodable image, non-JSON answer,
+malformed verdict, HTTP error, every model failed, unexpected exception — means
+"the image was NOT verified" and returns ``False``. The reason is always logged,
+and callers must publish without the image (text-only) instead of publishing an
+unvetted picture.
 """
 
 import base64
@@ -52,18 +60,30 @@ async def validate_image_with_gemini_vision(
         post_text: Optional generated post text to check together with the image
 
     Returns:
-        True if the image (and text) match the topic, False otherwise.
+        True only when the model explicitly approved the image (and the post
+        text, when provided). False on rejection AND on every "could not
+        verify" branch (fail-closed, TG-F-06).
     """
     if not image_path or not os.path.exists(image_path):
-        logger.info("No image to validate — skipping vision check")
-        return True
+        logger.warning(
+            "VISION GATE (fail-closed): no image to validate for "
+            f"'{topic_title}' — rejecting media"
+        )
+        return False
 
     if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY not configured, skipping vision validation")
-        return True
+        logger.warning(
+            "VISION GATE (fail-closed): GEMINI_API_KEY is not configured — "
+            f"cannot verify {os.path.basename(image_path)}; rejecting media"
+        )
+        return False
 
     encoded = encode_image_to_base64(image_path)
     if not encoded:
+        logger.warning(
+            "VISION GATE (fail-closed): could not read/encode image "
+            f"{image_path} — rejecting media"
+        )
         return False
 
     mime_type, base64_data = encoded
@@ -115,6 +135,7 @@ async def validate_image_with_gemini_vision(
         },
     }
 
+    image_name = os.path.basename(image_path)
     async with httpx.AsyncClient(timeout=30) as client:
         for model_name in models:
             url = (
@@ -123,46 +144,97 @@ async def validate_image_with_gemini_vision(
             )
             try:
                 resp = await client.post(url, json=body)
-                if resp.status_code in (429, 503):
-                    logger.warning(f"Gemini Vision {model_name} status {resp.status_code}, trying next model...")
-                    continue
-                data = resp.json()
-
-                if "candidates" in data and data["candidates"]:
-                    parts = data["candidates"][0].get("content", {}).get("parts", [])
-                    if parts:
-                        resp_text = parts[0].get("text", "").strip()
-                        logger.info(f"Gemini Vision ({model_name}) validation output: {resp_text}")
-
-                        parsed = _parse_validation_json(resp_text)
-                        if parsed is None:
-                            logger.warning(
-                                f"Gemini Vision returned non-JSON for {os.path.basename(image_path)}; "
-                                f"approving by default (raw: {resp_text[:120]})"
-                            )
-                            return True
-
-                        is_approved = bool(parsed.get("is_matching", False))
-                        if post_text:
-                            is_approved = is_approved and bool(
-                                parsed.get("text_ok", False)
-                            )
-                        if is_approved:
-                            logger.info(f"Image {os.path.basename(image_path)} APPROVED by Gemini Vision")
-                            return True
-                        else:
-                            reason = parsed.get("reason", "")
-                            logger.warning(
-                                f"Image {os.path.basename(image_path)} REJECTED by Gemini Vision: {reason or resp_text}"
-                            )
-                            return False
-
             except Exception as e:
-                logger.warning(f"Gemini Vision {model_name} error: {e}")
+                logger.warning(f"Gemini Vision {model_name} request error: {e}; trying next model")
                 continue
 
-    logger.warning("All Gemini Vision models failed or returned error; falling back to True")
-    return True
+            if resp.status_code in (429, 503):
+                logger.warning(f"Gemini Vision {model_name} status {resp.status_code}, trying next model...")
+                continue
+            if resp.status_code != 200:
+                logger.warning(
+                    f"Gemini Vision {model_name} returned HTTP {resp.status_code}; trying next model"
+                )
+                continue
+
+            try:
+                data = resp.json()
+            except Exception as e:
+                logger.warning(
+                    f"Gemini Vision {model_name} returned an invalid JSON envelope: {e}; "
+                    "trying next model"
+                )
+                continue
+
+            candidates = data.get("candidates") if isinstance(data, dict) else None
+            if not candidates:
+                logger.warning(
+                    f"Gemini Vision {model_name} returned no candidates "
+                    "(safety block or empty answer); trying next model"
+                )
+                continue
+
+            parts = candidates[0].get("content", {}).get("parts", []) or []
+            resp_text = (parts[0].get("text") or "").strip() if parts else ""
+            if not resp_text:
+                logger.warning(f"Gemini Vision {model_name} returned an empty answer; trying next model")
+                continue
+
+            logger.info(f"Gemini Vision ({model_name}) validation output: {resp_text}")
+
+            parsed = _parse_validation_json(resp_text)
+            if parsed is None:
+                logger.warning(
+                    f"Gemini Vision {model_name} returned non-JSON for {image_name}; "
+                    f"cannot verify (raw: {resp_text[:120]}); trying next model"
+                )
+                continue
+
+            verdict = _extract_verdict(parsed, require_text=bool(post_text))
+            if verdict is None:
+                logger.warning(
+                    f"Gemini Vision {model_name} returned a malformed verdict for {image_name}: "
+                    f"{parsed!r}; trying next model"
+                )
+                continue
+
+            is_approved, reason = verdict
+            if is_approved:
+                logger.info(f"Image {image_name} APPROVED by Gemini Vision")
+                return True
+
+            logger.warning(
+                f"Image {image_name} REJECTED by Gemini Vision: {reason or resp_text}"
+            )
+            return False
+
+    logger.warning(
+        "VISION GATE (fail-closed): all Gemini Vision models failed or returned unusable "
+        f"answers — image {image_name} rejected"
+    )
+    return False
+
+
+def _extract_verdict(parsed: dict, *, require_text: bool) -> tuple[bool, str] | None:
+    """Validate Gemini's JSON verdict and return (approved, reason) or None.
+
+    None means the payload is malformed (missing/non-boolean ``is_matching`` or
+    ``text_ok``) and must be treated as "could not verify" (fail-closed), not as
+    an approval.
+    """
+    is_matching = parsed.get("is_matching")
+    if not isinstance(is_matching, bool):
+        return None
+
+    text_ok = parsed.get("text_ok") if require_text else True
+    if not isinstance(text_ok, bool):
+        return None
+
+    reason = parsed.get("reason", "")
+    if not isinstance(reason, str):
+        reason = str(reason)
+
+    return (is_matching and text_ok, reason)
 
 
 def _parse_validation_json(resp_text: str) -> dict | None:
