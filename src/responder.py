@@ -14,8 +14,11 @@ import httpx
 
 from config.settings import TELEGRAM_BOT_TOKEN
 from config.prompts import START_RESPONSE
+from src.log_safety import configure_safe_logging
 
-logging.basicConfig(level=logging.INFO)
+# SECURITY (TG-F-09): токен бота передаётся в пути URL Bot API; INFO-логи httpx
+# писали его целиком. Гасим HTTP-логи и вырезаем секреты из сообщений.
+configure_safe_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 LAST_UPDATE_FILE = os.path.join(
@@ -62,7 +65,15 @@ async def process_updates():
             return
 
         if not data.get("ok"):
-            logger.error(f"getUpdates failed: {data}")
+            # SECURITY (TG-F-09): описание ошибки не содержит токен, но логируем
+            # только error_code/description, а не весь ответ (URL с токеном
+            # может попасть в поле/исключение).
+            logger.error(
+                "getUpdates failed: error_code=%s description=%r parameters=%r",
+                data.get("error_code"),
+                data.get("description"),
+                data.get("parameters"),
+            )
             return
 
         updates = data.get("result", [])

@@ -23,8 +23,12 @@ from telegram import Bot, Chat, Update
 from telegram.constants import UpdateType
 
 from config.settings import TELEGRAM_BOT_TOKEN
+from src.log_safety import configure_safe_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# SECURITY (TG-F-09): httpx/httpcore INFO-логи содержат URL с токеном бота.
+configure_safe_logging(
+    level=logging.INFO, log_format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 

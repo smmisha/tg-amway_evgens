@@ -2,6 +2,12 @@
 """Anonymize PII in JSON files under data/ by replacing emails, phones, and credit-card-like numbers.
 Creates backups with .bak extension before modifying.
 Usage: python scripts/anonymize_data.py [--dry-run]
+
+SECURITY (TG-F-11): телефонный шаблон ограничен реальными телефонными форматами
+UA/RU/международными (``+380 ...``, ``0XX XXX XX XX``, ``+7 (999) ...``,
+``8 (999) ...``, разделители ``- ( )`` и пробелы). Даты, ID, цены и прочие
+числовые последовательности больше не переписываются: «любые 7+ цифр» — это
+слишком широко и портило данные.
 """
 import re
 import json
@@ -9,7 +15,35 @@ from pathlib import Path
 import argparse
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PHONE_RE = re.compile(r"\+?\d[\d\-() ]{5,}\d")
+
+# SECURITY (TG-F-11): только телефонные форматы. Каждая ветка требует
+# «телефонный» префикс (+ или код оператора/страны) и/или разделитель, поэтому
+# голые цифровые ID, даты (2026-08-02, 08.02.2026) и цены не матчатся.
+# [ \t\u00a0-] — пробел, таб, NBSP, дефис (переводы строк намеренно исключены).
+PHONE_RE = re.compile(
+    r"""
+    (?<![\w+])
+    (?:
+        # +380 XX XXX XX XX / +380671234567 (UA)
+        \+38[ \t\u00a0\-]?\(?0\d{2}\)?[ \t\u00a0\-]?\d{3}[ \t\u00a0\-]?\d{2}[ \t\u00a0\-]?\d{2}
+        # прочие международные: +7 (999) 123-45-67, +1 555 123 4567, +44 20 7946 0958
+      | \+\d{1,3}[ \t\u00a0\-]?\(?\d{1,4}\)?(?:[ \t\u00a0\-]?\d{2,4}){2,4}
+        # 0XX XXX XX XX / (067) 123-45-67 — обязательный разделитель после кода
+        # оператора, поэтому слитный 10-значный ID не матчится
+      | \(?0\d{2}\)?[ \t\u00a0\-]\(?\d{2,3}\)?[ \t\u00a0\-]?\d{2}[ \t\u00a0\-]?\d{2}
+        # 8 (9XX) XXX-XX-XX — обязательный разделитель после 8
+      | 8[ \t\u00a0\-]\(?9\d{2}\)?[ \t\u00a0\-]?\d{3}[ \t\u00a0\-]?\d{2}[ \t\u00a0\-]?\d{2}
+    )
+    (?![\w])
+    """,
+    re.VERBOSE,
+)
+
+# Даты/время, которые не должны считаться телефоном даже при совпадении формы.
+_DATE_LIKE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}|\d{2}[./]\d{2}[./]\d{4}|\d{2}:\d{2}"
+)
+
 CC_RE = re.compile(r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b")
 
 PLACEHOLDERS = {
@@ -19,23 +53,33 @@ PLACEHOLDERS = {
 }
 
 
+def _is_phone(candidate: str) -> bool:
+    """Проверка кандидата: телефонный диапазон цифр и «телефонное» начало."""
+    if _DATE_LIKE_RE.search(candidate):
+        return False
+    digits = re.sub(r"\D", "", candidate)
+    if not 9 <= len(digits) <= 15:
+        return False
+    if candidate.startswith("+"):
+        return True
+    if digits.startswith("0"):
+        return len(digits) in (10, 11)  # 0XX XXX XX XX (+ код города)
+    return digits.startswith("89") and len(digits) == 11  # 8 (9XX) XXX-XX-XX
+
+
+def _replace_phone(match: "re.Match[str]") -> str:
+    candidate = match.group(0)
+    if _is_phone(candidate):
+        return PLACEHOLDERS['phone']
+    return candidate
+
+
 def anonymize_value(v):
     if not isinstance(v, str):
         return v
     s = v
     s = EMAIL_RE.sub(PLACEHOLDERS['email'], s)
-    # Replace phone-like patterns but avoid ISO dates (YYYY-MM-DD with following 'T')
-    def phone_replacer(match):
-        m = match.group(0)
-        start = match.start()
-        end = match.end()
-        after = v[end] if end < len(v) else ''
-        # If this looks like an ISO date (e.g. 2026-08-02) followed by 'T', skip replacement
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", m) and after == 'T':
-            return m
-        return PLACEHOLDERS['phone']
-
-    s = PHONE_RE.sub(phone_replacer, s)
+    s = PHONE_RE.sub(_replace_phone, s)
     s = CC_RE.sub(PLACEHOLDERS['cc'], s)
     return s
 

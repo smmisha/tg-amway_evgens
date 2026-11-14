@@ -41,6 +41,7 @@ from config.settings import (
     TELEGRAM_CHAT_ID,
 )
 from src.book_enricher import get_book_enrichment
+from src.log_safety import configure_safe_logging
 from src.media import download_first_image, cleanup_temp_media
 from src.media_validator import validate_image_with_gemini_vision
 from src.publisher import publish_post
@@ -49,9 +50,12 @@ from src.scraper import scrape_amway, Article
 from src.storage import AttemptStorage, Storage
 
 # Configure logging
-logging.basicConfig(
+# SECURITY (TG-F-09): httpx/httpcore INFO-логи содержат полный URL запроса, а в
+# URL по дизайну Bot API/Gemini лежат токен и API-ключ. Централизованный helper
+# гасит HTTP-логи до WARNING и вырезает секреты из всех сообщений.
+configure_safe_logging(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    log_format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)

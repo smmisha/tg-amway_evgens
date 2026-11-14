@@ -69,6 +69,67 @@ def _clean_image_url(url: str) -> str:
     return url
 
 
+# SECURITY (TG-F-12): sitemap приходит из сети, а stdlib ElementTree раскрывает
+# внутренние entity — значит, нужен fail-closed фильтр от entity expansion
+# (billion laughs) и XXE-подобных конструкций. Легитимный sitemap.ua — обычный
+# XML без DOCTYPE, поэтому документ с DTD/ENTITY пропускается с warning.
+MAX_SITEMAP_BYTES = 10 * 1024 * 1024  # 10 MiB на один sitemap-документ
+_UNSAFE_XML_MARKERS = (b"<!doctype", b"<!entity")
+
+
+def _declared_content_length(response) -> int:
+    """Content-Length из заголовков ответа (0, если не задан/нечитаем)."""
+    headers = getattr(response, "headers", None) or {}
+    try:
+        value = headers.get("Content-Length") or headers.get("content-length")
+        return int(value) if value else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sitemap_xml_bytes(response, url: str) -> bytes | None:
+    """Вернуть тело sitemap, если оно безопасно для ElementTree, иначе None."""
+    declared = _declared_content_length(response)
+    if declared > MAX_SITEMAP_BYTES:
+        logger.warning(
+            f"Sitemap {url}: declared size {declared} bytes exceeds limit "
+            f"{MAX_SITEMAP_BYTES}; skipping."
+        )
+        return None
+    content = getattr(response, "content", None)
+    if not isinstance(content, (bytes, bytearray)):
+        logger.warning(
+            f"Sitemap {url}: unexpected payload type {type(content).__name__}; skipping."
+        )
+        return None
+    raw = bytes(content)
+    if len(raw) > MAX_SITEMAP_BYTES:
+        logger.warning(
+            f"Sitemap {url}: payload is {len(raw)} bytes (limit {MAX_SITEMAP_BYTES}); skipping."
+        )
+        return None
+    lowered = raw.lower()
+    if any(marker in lowered for marker in _UNSAFE_XML_MARKERS):
+        logger.warning(
+            f"Refusing to parse sitemap {url}: DOCTYPE/ENTITY declaration detected "
+            f"(XML entity-expansion hardening)."
+        )
+        return None
+    return raw
+
+
+def _parse_sitemap_xml(response, url: str) -> ET.Element | None:
+    """Проверить размер/DTD и распарсить XML sitemap (fail-closed, TG-F-12)."""
+    raw = _sitemap_xml_bytes(response, url)
+    if raw is None:
+        return None
+    try:
+        return ET.fromstring(raw)
+    except ET.ParseError as e:
+        logger.warning(f"Failed to parse sitemap XML {url}: {e}")
+        return None
+
+
 def _fetch_sitemap_product_urls() -> list[str]:
     """Fetch all product URLs from amway.ua XML sitemaps via S3."""
     try:
@@ -76,7 +137,9 @@ def _fetch_sitemap_product_urls() -> list[str]:
         if r.status_code != 200:
             logger.warning(f"Sitemap index returned status {r.status_code}")
             return []
-        root = ET.fromstring(r.content)
+        root = _parse_sitemap_xml(r, "https://www.amway.ua/sitemap.xml")
+        if root is None:
+            return []
         sitemap_locs = [elem.text for elem in root.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc") if elem.text]
         product_sitemaps = [u for u in sitemap_locs if "Product-" in u]
         if not product_sitemaps:
@@ -88,9 +151,10 @@ def _fetch_sitemap_product_urls() -> list[str]:
             try:
                 r_prod = cffi_requests.get(sm_url, impersonate="chrome124", timeout=20)
                 if r_prod.status_code == 200:
-                    root_prod = ET.fromstring(r_prod.content)
-                    urls = [elem.text for elem in root_prod.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc") if elem.text]
-                    all_products.extend(urls)
+                    root_prod = _parse_sitemap_xml(r_prod, sm_url)
+                    if root_prod is not None:
+                        urls = [elem.text for elem in root_prod.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc") if elem.text]
+                        all_products.extend(urls)
             except Exception as e:
                 logger.warning(f"Failed to fetch sub-sitemap {sm_url}: {e}")
                 continue
