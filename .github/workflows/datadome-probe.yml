@@ -3,6 +3,12 @@ name: DataDome Probe — check amway.ua from runner IP
 on:
   workflow_dispatch: {}
 
+# SECURITY (F-10): явный минимальный набор прав вместо наследования дефолта
+# репозитория. Probe только читает репозиторий и ставит зависимости —
+# ни записи в contents, ни artifacts, ни прочих прав не требуется.
+permissions:
+  contents: read
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -10,16 +16,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
       - name: Install dependencies
+        # SECURITY (TG-F-08): пиннинг + хэши (playwright/httpx входят в общий lock).
         run: |
-          pip install playwright httpx
+          pip install --require-hashes -r requirements.lock
           python -m playwright install chromium --with-deps
 
       - name: Install Xvfb (headful display)

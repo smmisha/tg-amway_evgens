@@ -26,8 +26,12 @@ cd tg-amway_evgens
 ### 2. Установка зависимостей
 
 ```bash
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 ```
+
+`requirements.txt` содержит только нижние границы для людей; актуальные версии и
+SHA-256-хэши зафиксированы в `requirements.lock`. Как обновлять lock —
+см. [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md).
 
 ### 3. Настройка
 
